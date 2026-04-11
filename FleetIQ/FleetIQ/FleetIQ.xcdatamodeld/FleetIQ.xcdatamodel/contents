@@ -1,9 +1,83 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="1" systemVersion="11A491" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithCloudKit="false" userDefinedModelVersionIdentifier="">
-    <entity name="Item" representedClassName="Item" syncable="YES" codeGenerationType="class">
-        <attribute name="timestamp" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+    <entity name="VehicleEntity" representedClassName="VehicleEntity" syncable="YES" codeGenerationType="class">
+        <attribute name="assignedDriverId" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" optional="NO" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="currentMileage" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="fuelType" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="id" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="insuranceExpiry" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="licenceExpiry" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="make" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="model" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="registration" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="year" optional="NO" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+    </entity>
+    <entity name="ServiceRecordEntity" representedClassName="ServiceRecordEntity" syncable="YES" codeGenerationType="class">
+        <attribute name="costLKR" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="date" optional="NO" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="garageName" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="id" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="mileageAtService" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="notes" optional="YES" attributeType="String"/>
+        <attribute name="serviceType" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="vehicleId" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="DriverEntity" representedClassName="DriverEntity" syncable="YES" codeGenerationType="class">
+        <attribute name="assignedVehicleId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="email" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="firestoreId" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="id" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="phone" optional="NO" attributeType="String" defaultValueString=""/>
+    </entity>
+    <entity name="FuelLogEntity" representedClassName="FuelLogEntity" syncable="YES" codeGenerationType="class">
+        <attribute name="costPerLitre" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="date" optional="NO" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="kmPerLitre" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="litres" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="mileage" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="totalCostLKR" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="vehicleId" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="FaultReportEntity" representedClassName="FaultReportEntity" syncable="YES" codeGenerationType="class">
+        <attribute name="createdAt" optional="NO" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="descriptionText" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="driverId" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="id" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="latitude" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="longitude" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="photoURL" optional="YES" attributeType="String"/>
+        <attribute name="status" optional="NO" attributeType="String" defaultValueString="open"/>
+        <attribute name="urgency" optional="NO" attributeType="String" defaultValueString="medium"/>
+        <attribute name="vehicleId" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="TripLogEntity" representedClassName="TripLogEntity" syncable="YES" codeGenerationType="class">
+        <attribute name="date" optional="NO" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="destination" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="distanceKm" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="driverId" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="endMileage" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="id" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="purpose" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="startMileage" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="vehicleId" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="DocumentEntity" representedClassName="DocumentEntity" syncable="YES" codeGenerationType="class">
+        <attribute name="expiryDate" optional="NO" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="photoURL" optional="YES" attributeType="String"/>
+        <attribute name="type" optional="NO" attributeType="String" defaultValueString=""/>
+        <attribute name="vehicleId" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
     </entity>
     <elements>
-        <element name="Item" positionX="-63" positionY="-18" width="128" height="44"/>
+        <element name="VehicleEntity" positionX="-63" positionY="-18" width="128" height="224"/>
+        <element name="ServiceRecordEntity" positionX="96" positionY="96" width="128" height="179"/>
+        <element name="DriverEntity" positionX="255" positionY="174" width="128" height="134"/>
+        <element name="FuelLogEntity" positionX="414" positionY="252" width="128" height="179"/>
+        <element name="FaultReportEntity" positionX="573" positionY="330" width="128" height="224"/>
+        <element name="TripLogEntity" positionX="732" positionY="408" width="128" height="201"/>
+        <element name="DocumentEntity" positionX="891" positionY="486" width="128" height="111"/>
     </elements>
 </model>

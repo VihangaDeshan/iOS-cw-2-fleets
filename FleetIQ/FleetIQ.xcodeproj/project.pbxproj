@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		E505ED3E2F8AD88F00DC7CAE /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = E505ED3D2F8AD88F00DC7CAE /* FirebaseAuth */; };
+		E505ED402F8AD89F00DC7CAE /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = E505ED3F2F8AD89F00DC7CAE /* FirebaseFirestore */; };
+		E505ED422F8AD8A600DC7CAE /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = E505ED412F8AD8A600DC7CAE /* FirebaseStorage */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		E57C86502F8AB5F900777C17 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -35,11 +41,6 @@
 			path = FleetIQ;
 			sourceTree = "<group>";
 		};
-		E57C86522F8AB5F900777C17 /* FleetIQTests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = FleetIQTests;
-			sourceTree = "<group>";
-		};
 		E57C865C2F8AB5FA00777C17 /* FleetIQUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = FleetIQUITests;
@@ -52,6 +53,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E505ED3E2F8AD88F00DC7CAE /* FirebaseAuth in Frameworks */,
+				E505ED402F8AD89F00DC7CAE /* FirebaseFirestore in Frameworks */,
+				E505ED422F8AD8A600DC7CAE /* FirebaseStorage in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -72,12 +76,19 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		E505ED3C2F8AD88F00DC7CAE /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		E57C86342F8AB5F700777C17 = {
 			isa = PBXGroup;
 			children = (
 				E57C863F2F8AB5F700777C17 /* FleetIQ */,
-				E57C86522F8AB5F900777C17 /* FleetIQTests */,
 				E57C865C2F8AB5FA00777C17 /* FleetIQUITests */,
+				E505ED3C2F8AD88F00DC7CAE /* Frameworks */,
 				E57C863E2F8AB5F700777C17 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -112,6 +123,9 @@
 			);
 			name = FleetIQ;
 			packageProductDependencies = (
+				E505ED3D2F8AD88F00DC7CAE /* FirebaseAuth */,
+				E505ED3F2F8AD89F00DC7CAE /* FirebaseFirestore */,
+				E505ED412F8AD8A600DC7CAE /* FirebaseStorage */,
 			);
 			productName = FleetIQ;
 			productReference = E57C863D2F8AB5F700777C17 /* FleetIQ.app */;
@@ -129,9 +143,6 @@
 			);
 			dependencies = (
 				E57C86512F8AB5F900777C17 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				E57C86522F8AB5F900777C17 /* FleetIQTests */,
 			);
 			name = FleetIQTests;
 			packageProductDependencies = (
@@ -195,6 +206,9 @@
 			);
 			mainGroup = E57C86342F8AB5F700777C17;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				E505ED3B2F8AD86900DC7CAE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E57C863E2F8AB5F700777C17 /* Products */;
 			projectDirPath = "";
@@ -321,7 +335,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -378,7 +392,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -407,7 +421,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = vihanga.FleetIQ;
+				PRODUCT_BUNDLE_IDENTIFIER = com.student.fleetiq;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -438,7 +452,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = vihanga.FleetIQ;
+				PRODUCT_BUNDLE_IDENTIFIER = com.student.fleetiq;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -457,9 +471,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = vihanga.FleetIQTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.student.fleetiqTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -478,9 +492,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = vihanga.FleetIQTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.student.fleetiqTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -499,7 +513,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = vihanga.FleetIQUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.student.fleetiqUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -518,7 +532,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = vihanga.FleetIQUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.student.fleetiqUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -570,6 +584,35 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		E505ED3B2F8AD86900DC7CAE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.12.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E505ED3D2F8AD88F00DC7CAE /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E505ED3B2F8AD86900DC7CAE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		E505ED3F2F8AD89F00DC7CAE /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E505ED3B2F8AD86900DC7CAE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		E505ED412F8AD8A600DC7CAE /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E505ED3B2F8AD86900DC7CAE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = E57C86352F8AB5F700777C17 /* Project object */;
 }
