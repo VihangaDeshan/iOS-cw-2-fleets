@@ -68,13 +68,18 @@ struct MyFaultHistoryView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Text("Open: \(faultViewModel.openFaultCount)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.statusOverdue)
-                    .clipShape(Capsule())
+                NavigationLink {
+                    ReportFaultView()
+                } label: {
+                    Text("Create")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.statusOverdue)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
             }
         }
         .safeAreaInset(edge: .top) {
@@ -165,6 +170,14 @@ struct MyFaultHistoryView: View {
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
+            } else if (fault.photoURL ?? "").hasPrefix("storage_path:") {
+                Text("Photo uploaded (URL syncing)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.chipOrangeText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.chipOrangeBg)
+                    .clipShape(Capsule())
             } else if (fault.photoURL ?? "") == "upload_failed" {
                 Text("Photo upload failed")
                     .font(.caption2.weight(.semibold))

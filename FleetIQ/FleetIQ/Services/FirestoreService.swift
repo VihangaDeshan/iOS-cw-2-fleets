@@ -35,14 +35,14 @@ class FirestoreService {
 
     // MARK: - Private Properties
     private lazy var db: Firestore = {
-        Self.ensureFirebaseConfigured()
+        Self.assertFirebaseConfigured()
         return Firestore.firestore()
     }()
 
     // MARK: - Initializer
     /// Creates a Firestore service instance.
     private init() {
-        Self.ensureFirebaseConfigured()
+        Self.assertFirebaseConfigured()
     }
 
     // MARK: - Vehicles
@@ -227,21 +227,49 @@ class FirestoreService {
                 userInfo: [NSLocalizedDescriptionKey:
                     "Could not convert image to JPEG"])
         }
-        let ref = Storage.storage().reference().child(path)
-        let _ = try await ref.putDataAsync(data)
+
+        let normalizedPath = normalizedStoragePath(path)
+        guard !normalizedPath.isEmpty else {
+            throw NSError(
+                domain: "FleetIQ",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid Firebase Storage path."]
+            )
+        }
+
+        let ref = Storage.storage().reference().child(normalizedPath)
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        let uploadedMetadata = try await ref.putDataAsync(data, metadata: metadata)
+        #if DEBUG
+        print("[FirestoreService] putData succeeded: path=\(uploadedMetadata.path ?? normalizedPath), size=\(uploadedMetadata.size)")
+        #endif
 
         // Storage can briefly return "object does not exist" immediately after upload.
         var lastError: Error?
-        for attempt in 1...4 {
+        for attempt in 1...8 {
             do {
+                _ = try await ref.getMetadata()
                 let url = try await ref.downloadURL()
                 return url.absoluteString
             } catch {
                 lastError = error
-                if attempt < 4 {
-                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 300_000_000)
+                #if DEBUG
+                let nsError = error as NSError
+                print("[FirestoreService] downloadURL retry \(attempt)/8 failed for \(normalizedPath): \(nsError.domain) (\(nsError.code)) - \(nsError.localizedDescription)")
+                #endif
+                if attempt < 8 {
+                    let delayNanoseconds = min(UInt64(2_000_000_000), UInt64(attempt) * 400_000_000)
+                    try? await Task.sleep(nanoseconds: delayNanoseconds)
                 }
             }
+        }
+
+        if isStorageObjectNotFound(lastError) {
+            #if DEBUG
+            print("[FirestoreService] Upload succeeded but URL is not yet readable for \(normalizedPath). Saving storage path placeholder.")
+            #endif
+            return "storage_path:\(normalizedPath)"
         }
 
         throw lastError ?? NSError(
@@ -864,21 +892,38 @@ class FirestoreService {
         ]
     }
 
-    /// Ensures the default Firebase app is configured before using Firestore.
-    private static func ensureFirebaseConfigured() {
+    /// Guards against using FirestoreService before app startup configured Firebase.
+    private static func assertFirebaseConfigured() {
 #if canImport(FirebaseCore)
-        if FirebaseApp.app() == nil {
-            if Thread.isMainThread {
-                FirebaseApp.configure()
-            } else {
-                DispatchQueue.main.sync {
-                    if FirebaseApp.app() == nil {
-                        FirebaseApp.configure()
-                    }
-                }
-            }
-        }
+        precondition(
+            FirebaseApp.app() != nil,
+            "FirebaseApp.configure() must run in AppDelegate before using FirestoreService."
+        )
 #endif
+    }
+
+    /// Normalizes user-provided storage paths to avoid accidental invalid child references.
+    private func normalizedStoragePath(_ rawPath: String) -> String {
+        let segments = rawPath
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return segments.joined(separator: "/")
+    }
+
+    /// Returns true when Storage reports the object is not yet readable.
+    private func isStorageObjectNotFound(_ error: Error?) -> Bool {
+        guard let nsError = error as NSError? else {
+            return false
+        }
+
+        if nsError.domain == StorageErrorDomain,
+           nsError.code == StorageErrorCode.objectNotFound.rawValue {
+            return true
+        }
+
+        return nsError.localizedDescription.lowercased().contains("does not exist")
     }
 
     /// Maps fleet drivers collection docs into fleet-driver models.

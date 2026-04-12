@@ -138,6 +138,14 @@ struct FaultsTabView: View {
                 Text("Photo attached")
                     .font(.caption2.weight(.semibold))
                     .foregroundColor(.statusActive)
+            } else if (fault.photoURL ?? "").hasPrefix("storage_path:") {
+                Text("Photo uploaded (URL syncing)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(.chipOrangeText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.chipOrangeBg)
+                    .clipShape(Capsule())
             } else if (fault.photoURL ?? "") == "upload_failed" {
                 Text("Photo upload failed")
                     .font(.caption2.weight(.semibold))
@@ -249,6 +257,12 @@ private struct ManagerFaultDetailView: View {
                             EmptyView()
                         }
                     }
+                }
+            } else if (fault.photoURL ?? "").hasPrefix("storage_path:") {
+                Section("Photo") {
+                    Text("Photo uploaded. Preview URL is still syncing.")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.chipOrangeText)
                 }
             } else if (fault.photoURL ?? "") == "upload_failed" {
                 Section("Photo") {

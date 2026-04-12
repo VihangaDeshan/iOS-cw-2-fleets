@@ -10,6 +10,7 @@ import Combine
 import CoreData
 import CoreLocation
 import FirebaseFirestore
+import FirebaseStorage
 import UIKit
 
 // MARK: - Fault View Model
@@ -37,14 +38,14 @@ final class FaultViewModel: ObservableObject {
 
     // MARK: - Public API
 
-    /// Submits a fault report with GPS, optional photo upload, cloud save, then local save.
+    /// Submits a fault report with GPS, optional photo upload(s), cloud save, then local save.
     /// Order: GPS -> photo upload -> Firestore save -> CoreData save.
     func submitFault(
         vehicleId: String,
         driverId: String,
         description: String,
         urgency: String,
-        photo: UIImage?,
+        photos: [UIImage],
         fleetId: String
     ) async throws {
         let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -82,20 +83,39 @@ final class FaultViewModel: ObservableObject {
             coordinate = CLLocationCoordinate2D(latitude: 0, longitude: 0)
         }
 
-        // 2) Upload photo if available
-        var photoURL: String?
-        if let photo {
+        // 2) Upload photos if available (up to 3)
+        let selectedPhotos = Array(photos.prefix(3))
+        var photoReferences: [String] = []
+        var hadUploadFailure = false
+
+        for (index, photo) in selectedPhotos.enumerated() {
             let path = firestoreService.faultPhotoPath(
                 fleetId: normalizedFleetId,
-                faultId: faultUUID.uuidString
+                faultId: faultUUID.uuidString,
+                filename: "photo\(index + 1)"
             )
+
             do {
-                photoURL = try await firestoreService.uploadPhoto(photo, path: path)
+                let uploadedReference = try await firestoreService.uploadPhoto(photo, path: path)
+                photoReferences.append(uploadedReference)
             } catch {
                 // Keep report submission flowing even if optional photo upload fails.
-                photoURL = "upload_failed"
+                #if DEBUG
+                let nsError = error as NSError
+                print("[FaultViewModel] Photo upload fallback triggered: \(nsError.domain) (\(nsError.code)) - \(nsError.localizedDescription)")
+                #endif
+
+                if shouldUsePendingStoragePath(for: error) {
+                    photoReferences.append("storage_path:\(path)")
+                } else {
+                    hadUploadFailure = true
+                }
             }
         }
+
+        let primaryPhotoReference = photoReferences.first(where: { $0.hasPrefix("http") })
+            ?? photoReferences.first
+            ?? (hadUploadFailure ? "upload_failed" : nil)
 
         // 3) Save to Firestore
         var payload: [String: Any] = [
@@ -112,8 +132,12 @@ final class FaultViewModel: ObservableObject {
             "updatedAt": Timestamp(date: Date())
         ]
 
-        if let photoURL {
-            payload["photoURL"] = photoURL
+        if let primaryPhotoReference {
+            payload["photoURL"] = primaryPhotoReference
+        }
+
+        if !photoReferences.isEmpty {
+            payload["photoURLs"] = photoReferences
         }
 
         try await firestoreService.saveFaultReport(
@@ -131,7 +155,7 @@ final class FaultViewModel: ObservableObject {
         localFault.status = "open"
         localFault.latitude = coordinate.latitude
         localFault.longitude = coordinate.longitude
-        localFault.photoURL = photoURL
+        localFault.photoURL = primaryPhotoReference
         localFault.createdAt = Date()
 
         try context.save()
@@ -241,7 +265,7 @@ final class FaultViewModel: ObservableObject {
             ?? ""
         entity.urgency = (data["urgency"] as? String ?? "medium")
         entity.status = (data["status"] as? String ?? "open")
-        entity.photoURL = data["photoURL"] as? String
+        entity.photoURL = preferredPhotoReference(from: data)
         entity.latitude = numericValue(from: data["latitude"])
         entity.longitude = numericValue(from: data["longitude"])
         entity.createdAt = parseDateValue(data["createdAt"]) ?? Date()
@@ -307,6 +331,20 @@ final class FaultViewModel: ObservableObject {
         return 0
     }
 
+    private func preferredPhotoReference(from data: [String: Any]) -> String? {
+        if let single = data["photoURL"] as? String,
+           !single.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return single
+        }
+
+        if let list = data["photoURLs"] as? [String],
+           !list.isEmpty {
+            return list.first(where: { $0.hasPrefix("http") }) ?? list.first
+        }
+
+        return nil
+    }
+
     private func recalculateOpenFaultCount() {
         let source = faultReports.isEmpty ? myFaults : faultReports
         openFaultCount = source.filter { fault in
@@ -314,5 +352,16 @@ final class FaultViewModel: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased() != "resolved"
         }.count
+    }
+
+    /// Returns true when Storage reports object-not-found during immediate post-upload URL fetch.
+    private func shouldUsePendingStoragePath(for error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == StorageErrorDomain,
+           nsError.code == StorageErrorCode.objectNotFound.rawValue {
+            return true
+        }
+
+        return nsError.localizedDescription.lowercased().contains("does not exist")
     }
 }

@@ -42,8 +42,8 @@ struct ReportFaultView: View {
         authViewModel.assignedVehicleId.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var firstSelectedPhoto: UIImage? {
-        photo1 ?? photo2 ?? photo3
+    private var selectedPhotos: [UIImage] {
+        [photo1, photo2, photo3].compactMap { $0 }
     }
 
     private var canSubmit: Bool {
@@ -180,7 +180,7 @@ struct ReportFaultView: View {
             Text("Photos (Optional)")
                 .font(.headline)
 
-            Text("Attach up to 3 images from your photo library. In this step, the first selected image is uploaded.")
+            Text("Attach up to 3 images from your photo library. Selected images are uploaded in order.")
                 .font(.caption)
                 .foregroundColor(.secondary)
 
@@ -268,14 +268,14 @@ struct ReportFaultView: View {
                 driverId: normalizedDriverId,
                 description: descriptionText,
                 urgency: selectedUrgency.rawValue,
-                photo: firstSelectedPhoto,
+                photos: selectedPhotos,
                 fleetId: normalizedFleetId
             )
 
             submittedAt = Date()
             showSuccessScreen = true
         } catch {
-            if firstSelectedPhoto != nil,
+            if !selectedPhotos.isEmpty,
                shouldRetryWithoutPhoto(for: error) {
                 do {
                     try await faultViewModel.submitFault(
@@ -283,7 +283,7 @@ struct ReportFaultView: View {
                         driverId: normalizedDriverId,
                         description: descriptionText,
                         urgency: selectedUrgency.rawValue,
-                        photo: nil,
+                        photos: [],
                         fleetId: normalizedFleetId
                     )
 
