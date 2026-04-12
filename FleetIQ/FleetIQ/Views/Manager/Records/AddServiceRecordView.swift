@@ -128,6 +128,23 @@ struct AddServiceRecordView: View {
                 Text("Vision · VNRecognizeTextRequest · On-device AI · No internet")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                if isProcessingOCR {
+                    HStack {
+                        ProgressView()
+                        Text("Reading invoice...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                } else if ocrFieldsExtracted {
+                    Label(ocrMessage, systemImage: "checkmark.circle.fill")
+                        .foregroundColor(.statusActive)
+                        .font(.subheadline)
+                } else if !ocrMessage.isEmpty {
+                    Text(ocrMessage)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
             } else {
                 if let selectedPhoto {
                     Image(uiImage: selectedPhoto)
@@ -267,6 +284,11 @@ struct AddServiceRecordView: View {
         isProcessingOCR = true
         ocrFieldsExtracted = false
         ocrMessage = ""
+        defer {
+            selectedPhoto = nil
+            selectedPhotoItem = nil
+            isProcessingOCR = false
+        }
 
         do {
             let lines = try await OCRService.shared.recognizeText(in: image)
@@ -282,6 +304,10 @@ struct AddServiceRecordView: View {
                 costLKR = String(format: "%.0f", cost)
             }
 
+            if let detectedMileage = result.mileageAtService {
+                mileage = String(format: "%.0f", detectedMileage)
+            }
+
             if let garageName = result.garageName {
                 garage = garageName
             }
@@ -293,6 +319,7 @@ struct AddServiceRecordView: View {
             var extractedCount = 0
             if result.serviceDate != nil { extractedCount += 1 }
             if result.costLKR != nil { extractedCount += 1 }
+            if result.mileageAtService != nil { extractedCount += 1 }
             if result.garageName != nil { extractedCount += 1 }
 
             let typeText: String
@@ -302,13 +329,18 @@ struct AddServiceRecordView: View {
                 typeText = "Auto-selected: \(detectedTypes.sorted().joined(separator: ", "))"
             }
 
-            ocrMessage = "OCR extracted \(extractedCount) fields. \(typeText)."
+            let mileageText: String
+            if result.mileageAtService == nil {
+                mileageText = "Enter mileage manually"
+            } else {
+                mileageText = "Mileage detected"
+            }
+
+            ocrMessage = "OCR extracted \(extractedCount) fields. \(typeText). \(mileageText)."
             ocrFieldsExtracted = true
         } catch {
             ocrMessage = "Could not read invoice. Enter details manually."
         }
-
-        isProcessingOCR = false
     }
 
     // MARK: - Save

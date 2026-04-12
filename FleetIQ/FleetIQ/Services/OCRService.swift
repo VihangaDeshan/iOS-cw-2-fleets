@@ -15,6 +15,7 @@ import UIKit
 struct OCRResult {
     var serviceDate: Date?
     var costLKR: Double?
+    var mileageAtService: Double?
     var registration: String?
     var garageName: String?
     var expiryDate: Date?
@@ -72,14 +73,23 @@ final class OCRService {
     /// - Returns: Extracted invoice details.
     func extractInvoiceFields(from lines: [String]) -> OCRResult {
         var result = OCRResult()
-        var allNumbers: [Double] = []
+        var costCandidates: [Double] = []
+        var labeledCostCandidates: [Double] = []
 
         for line in lines {
-            let costPattern = #"\d{1,3}(?:,\d{3})*(?:\.\d{2})?"#
-            if let match = line.range(of: costPattern, options: .regularExpression) {
-                let value = String(line[match]).replacingOccurrences(of: ",", with: "")
-                if let number = Double(value), number > 100 {
-                    allNumbers.append(number)
+            let lower = line.lowercased()
+
+            if result.mileageAtService == nil,
+               let mileage = extractMileage(from: line) {
+                result.mileageAtService = mileage
+            }
+
+            let numbers = extractNumericValues(from: line)
+            for number in numbers where number > 100 {
+                if isLikelyCostLine(lower) {
+                    labeledCostCandidates.append(number)
+                } else if !isLikelyMileageLine(lower) {
+                    costCandidates.append(number)
                 }
             }
 
@@ -94,30 +104,8 @@ final class OCRService {
             }
         }
 
-        result.costLKR = allNumbers.max()
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.count < 3 {
-                continue
-            }
-
-            if trimmed.contains(where: { $0.isNumber }) {
-                continue
-            }
-
-            if parseDate(from: trimmed) != nil {
-                continue
-            }
-
-            if result.registration != nil,
-               trimmed.uppercased().contains(result.registration!.uppercased()) {
-                continue
-            }
-
-            result.garageName = trimmed
-            break
-        }
+        result.costLKR = (labeledCostCandidates.max() ?? costCandidates.max())
+        result.garageName = extractGarageName(from: lines, registration: result.registration)
 
         return result
     }
@@ -255,6 +243,127 @@ final class OCRService {
         }
 
         return nil
+    }
+
+    /// Extracts all numeric values from a line, supporting comma-formatted and plain values.
+    /// - Parameter line: OCR line text.
+    /// - Returns: Parsed decimal values in scan order.
+    private func extractNumericValues(from line: String) -> [Double] {
+        let pattern = #"\d{4,7}(?:\.\d{1,2})?|\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d{1,3}(?:\.\d{1,2})?"#
+        let range = NSRange(line.startIndex..<line.endIndex, in: line)
+
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return []
+        }
+
+        return regex.matches(in: line, options: [], range: range).compactMap { match in
+            guard let valueRange = Range(match.range, in: line) else {
+                return nil
+            }
+
+            let raw = String(line[valueRange]).replacingOccurrences(of: ",", with: "")
+            return Double(raw)
+        }
+    }
+
+    /// Tries to detect odometer/mileage value from one OCR line.
+    /// - Parameter line: OCR line.
+    /// - Returns: Mileage value when confidently detected.
+    private func extractMileage(from line: String) -> Double? {
+        let lower = line.lowercased()
+        guard isLikelyMileageLine(lower) else {
+            return nil
+        }
+
+        let values = extractNumericValues(from: line)
+        for value in values {
+            if value >= 500, value <= 2_000_000 {
+                return value.rounded()
+            }
+        }
+
+        return nil
+    }
+
+    /// Picks best garage/workshop name from OCR lines using simple scoring heuristics.
+    /// - Parameters:
+    ///   - lines: OCR output lines.
+    ///   - registration: Optional extracted vehicle registration to ignore.
+    /// - Returns: Best candidate garage name.
+    private func extractGarageName(from lines: [String], registration: String?) -> String? {
+        var bestCandidate: String?
+        var bestScore = Int.min
+
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count >= 3 else {
+                continue
+            }
+
+            let lower = trimmed.lowercased()
+
+            if parseDate(from: trimmed) != nil {
+                continue
+            }
+
+            if let registration,
+               trimmed.uppercased().contains(registration.uppercased()) {
+                continue
+            }
+
+            // Prefer explicit labels such as "Garage: ABC Motors".
+            if containsAny(in: lower, keywords: ["garage", "workshop", "service center", "service centre"]),
+               let colonIndex = trimmed.firstIndex(of: ":") {
+                let value = trimmed[trimmed.index(after: colonIndex)...].trimmingCharacters(in: .whitespacesAndNewlines)
+                if value.count >= 3 {
+                    return value
+                }
+            }
+
+            var score = 0
+
+            if index < 6 {
+                score += 2
+            }
+
+            if containsAny(in: lower, keywords: ["motors", "motor", "garage", "workshop", "auto", "automobile", "service center", "service centre", "pvt", "ltd"]) {
+                score += 5
+            }
+
+            if containsAny(in: lower, keywords: ["invoice", "bill", "receipt", "customer", "vehicle", "reg", "plate", "total", "amount", "vat", "tax", "odo", "odometer", "mileage", "tel", "phone", "fax", "address", "date", "time", "cashier", "thank", "sub total"]) {
+                score -= 4
+            }
+
+            if containsAny(in: lower, keywords: ["lkr", "rs", "km", "kms"]) {
+                score -= 3
+            }
+
+            if trimmed.contains(where: { $0.isNumber }) {
+                score -= 2
+            }
+
+            if score > bestScore {
+                bestScore = score
+                bestCandidate = trimmed
+            }
+        }
+
+        guard bestScore > 0 else {
+            return nil
+        }
+
+        return bestCandidate
+    }
+
+    /// Returns true when a line likely describes invoice total/cost values.
+    private func isLikelyCostLine(_ lower: String) -> Bool {
+        containsAny(in: lower, keywords: ["total", "amount", "grand total", "net total", "balance", "paid", "lkr", "rs"]) &&
+            !containsAny(in: lower, keywords: ["odo", "odometer", "mileage", "km", "kms"])
+    }
+
+    /// Returns true when a line likely describes odometer reading.
+    private func isLikelyMileageLine(_ lower: String) -> Bool {
+        containsAny(in: lower, keywords: ["odo", "odometer", "mileage", "km", "kms", "km reading"])
     }
 
     /// Returns true when input text contains any given keyword.

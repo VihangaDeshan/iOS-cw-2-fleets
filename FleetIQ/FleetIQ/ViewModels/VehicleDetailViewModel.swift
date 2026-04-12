@@ -150,4 +150,76 @@ final class VehicleDetailViewModel: ObservableObject {
 
         isLoading = false
     }
+
+    /// Assigns or clears a driver for the current vehicle and syncs related driver profiles.
+    /// - Parameters:
+    ///   - assignedDriverName: Selected driver display name, nil to clear.
+    ///   - assignedDriverUserId: Selected driver profile ID, nil to clear.
+    ///   - previousDriverUserId: Previously assigned driver profile ID, if known.
+    ///   - fleetId: Current manager fleet identifier.
+    /// - Returns: True when assignment is synced locally and to Firestore.
+    func assignDriver(
+        assignedDriverName: String?,
+        assignedDriverUserId: String?,
+        previousDriverUserId: String?,
+        fleetId: String
+    ) async -> Bool {
+        guard let vehicleId = vehicle.id?.uuidString, !vehicleId.isEmpty else {
+            return false
+        }
+
+        let normalizedDriverName = assignedDriverName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDriverUserId = assignedDriverUserId?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPreviousUserId = previousDriverUserId?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        isLoading = true
+
+        do {
+            vehicle.assignedDriverId = (normalizedDriverName?.isEmpty == false) ? normalizedDriverName : nil
+            try context.save()
+
+            try await firestoreService.updateVehicle(
+                fleetId: fleetId,
+                vehicleId: vehicleId,
+                data: ["assignedDriverId": normalizedDriverName ?? ""]
+            )
+
+            if let previousUserId = normalizedPreviousUserId,
+               !previousUserId.isEmpty,
+               previousUserId != (normalizedDriverUserId ?? "") {
+                try await firestoreService.updateDriverUserAssignment(
+                    userId: previousUserId,
+                    vehicleId: ""
+                )
+                try await firestoreService.updateFleetDriverAssignment(
+                    fleetId: fleetId,
+                    driverId: previousUserId,
+                    vehicleId: ""
+                )
+            }
+
+            if let newDriverUserId = normalizedDriverUserId,
+               !newDriverUserId.isEmpty {
+                try await firestoreService.updateDriverUserAssignment(
+                    userId: newDriverUserId,
+                    vehicleId: vehicleId
+                )
+                try await firestoreService.updateFleetDriverAssignment(
+                    fleetId: fleetId,
+                    driverId: newDriverUserId,
+                    vehicleId: vehicleId
+                )
+            }
+
+            isLoading = false
+            return true
+        } catch {
+            print("VehicleDetailViewModel assignDriver error: \(error)")
+            isLoading = false
+            return false
+        }
+    }
 }

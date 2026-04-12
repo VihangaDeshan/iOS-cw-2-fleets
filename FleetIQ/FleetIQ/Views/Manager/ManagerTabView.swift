@@ -28,20 +28,20 @@ struct ManagerTabView: View {
                     Label("Fleet", systemImage: "truck.box.fill")
                 }
 
-            // Tab 3 - Faults (placeholder for now)
-            Text("Faults - coming in Part 7")
+            // Tab 3 - Faults
+            FaultsTabView()
                 .tabItem {
                     Label("Faults", systemImage: "exclamationmark.triangle.fill")
                 }
 
-            // Tab 4 - Records (placeholder for now)
-            Text("Records - coming in Part 8")
+            // Tab 4 - Records
+            RecordsTabView()
                 .tabItem {
                     Label("Records", systemImage: "doc.text.fill")
                 }
 
-            // Tab 5 - Settings (placeholder for now)
-            Text("Settings - coming in Part 13")
+            // Tab 5 - Settings
+            ManagerSettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape.fill")
                 }
@@ -49,8 +49,28 @@ struct ManagerTabView: View {
         .accentColor(.navyPrimary)
         .environmentObject(fleetViewModel)
         .onAppear {
-            fleetViewModel.loadVehicles(fleetId: authViewModel.fleetId)
+            startVehicleSyncIfPossible()
         }
+        .onChange(of: authViewModel.fleetId) { _, _ in
+            startVehicleSyncIfPossible()
+        }
+        .onDisappear {
+            fleetViewModel.stopListening()
+        }
+    }
+
+    // MARK: - Private Methods
+    /// Starts vehicle sync only when a valid fleet id is available.
+    private func startVehicleSyncIfPossible() {
+        let normalizedFleetId = authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedFleetId.isEmpty else {
+            fleetViewModel.stopListening()
+            fleetViewModel.errorMessage = "Fleet setup is incomplete for this account."
+            return
+        }
+
+        fleetViewModel.loadVehicles(fleetId: normalizedFleetId)
     }
 }
 

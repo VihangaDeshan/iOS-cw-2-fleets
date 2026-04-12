@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import CoreData
 
 // MARK: - Manager Home View
 struct ManagerHomeView: View {
@@ -13,8 +14,21 @@ struct ManagerHomeView: View {
     @EnvironmentObject var authViewModel: AuthViewModel
     @EnvironmentObject var fleetViewModel: FleetViewModel
 
+    @Environment(\.managedObjectContext) private var context
+
     @State private var showAddVehicle = false
-    @State private var showAddDriver = false
+    @State private var showManageDrivers = false
+    @State private var showRecords = false
+    @State private var showFaults = false
+    @State private var showAnalytics = false
+    @State private var showUserProfile = false
+
+    @State private var heroPage = 0
+    @State private var monthlySpend: Double = 0
+    @State private var averageEfficiency: Double = 0
+    @State private var bestVehicleRegistration = "-"
+    @State private var openFaultCount = 0
+    @State private var expiringInsuranceCount = 0
 
     // MARK: - Greeting
     var greeting: String {
@@ -53,7 +67,10 @@ struct ManagerHomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 0) {
-                    fleetHeroCard
+                    homeHeader
+                        .padding(.top, 12)
+
+                    heroSlider
                         .padding(.top, 8)
 
                     urgentAlertsSection
@@ -67,27 +84,83 @@ struct ManagerHomeView: View {
                 .padding(.horizontal, 12)
             }
             .background(Color.systemGroupedBg)
-            .navigationTitle("\(greeting) 👋")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Circle()
-                        .fill(Color.navyPrimary)
-                        .frame(width: 32, height: 32)
-                        .overlay(
-                            Text(managerInitials)
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(.white)
-                        )
-                        .accessibilityLabel("Manager profile")
-                }
-            }
+            .navigationBarHidden(true)
             .sheet(isPresented: $showAddVehicle) {
                 AddVehicleView()
                     .environmentObject(fleetViewModel)
                     .environmentObject(authViewModel)
             }
+            .sheet(isPresented: $showManageDrivers) {
+                ManageDriversView()
+                    .environmentObject(fleetViewModel)
+                    .environmentObject(authViewModel)
+            }
+            .sheet(isPresented: $showRecords) {
+                RecordsTabView()
+                    .environmentObject(fleetViewModel)
+            }
+            .sheet(isPresented: $showFaults) {
+                FaultsTabView()
+                    .environmentObject(authViewModel)
+            }
+            .sheet(isPresented: $showAnalytics) {
+                NavigationStack {
+                    AnalyticsView()
+                        .environmentObject(fleetViewModel)
+                }
+            }
+            .fullScreenCover(isPresented: $showUserProfile) {
+                NavigationStack {
+                    UserProfileView()
+                        .environmentObject(authViewModel)
+                }
+            }
+            .onAppear {
+                loadHomeMetrics()
+            }
         }
+    }
+
+    // MARK: - Home Header
+    var homeHeader: some View {
+        HStack {
+            Text("Hi Manager")
+                .font(.system(size: 22, weight: .bold))
+
+            Spacer()
+
+            Image(systemName: "bell.fill")
+                .font(.title3)
+                .padding(.trailing, 10)
+
+            Button {
+                showUserProfile = true
+            } label: {
+                Circle()
+                    .fill(Color.black)
+                    .frame(width: 32, height: 32)
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .foregroundColor(.white)
+                    )
+            }
+        }
+    }
+
+    // MARK: - Hero Slider
+    var heroSlider: some View {
+        TabView(selection: $heroPage) {
+            fleetHeroCard
+                .tag(0)
+
+            efficiencyHeroCard
+                .tag(1)
+
+            riskHeroCard
+                .tag(2)
+        }
+        .frame(height: 210)
+        .tabViewStyle(.page(indexDisplayMode: .automatic))
     }
 
     // MARK: - Fleet Hero Card
@@ -103,13 +176,20 @@ struct ManagerHomeView: View {
                     Text("\(fleetViewModel.vehicles.count) Vehicles")
                         .font(.system(size: 22, weight: .bold))
                         .foregroundColor(.white)
-
-                    Text(todayDateString)
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.65))
                 }
 
                 Spacer()
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("MONTHLY SPEND")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.6))
+                        .tracking(0.5)
+
+                    Text("LKR \(String(format: "%.0f", monthlySpend))")
+                        .font(.title3.weight(.bold))
+                        .foregroundColor(.white)
+                }
             }
 
             statusProgressBar
@@ -140,6 +220,77 @@ struct ManagerHomeView: View {
         .background(
             LinearGradient(
                 colors: [Color.navyPrimary, Color.navySecondary],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(14)
+    }
+
+    var efficiencyHeroCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("EFFICIENCY")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.65))
+                        .tracking(0.5)
+
+                    Text("\(String(format: "%.1f", averageEfficiency)) km/L")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundColor(.white)
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text("BEST VEHICLE")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.65))
+                        .tracking(0.5)
+
+                    Text(bestVehicleRegistration)
+                        .font(.title2.weight(.bold))
+                        .foregroundColor(.white)
+                }
+            }
+
+            Spacer()
+
+            HStack(alignment: .bottom, spacing: 8) {
+                ForEach(0..<7, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.white.opacity(0.25 + Double(index) * 0.07))
+                        .frame(width: 26, height: CGFloat(22 + index * 7))
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            LinearGradient(
+                colors: [Color(hex: "60C98D"), Color(hex: "2F74C6")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(14)
+    }
+
+    var riskHeroCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("→  \(openFaultCount) VEHICLE FAULT")
+                .font(.system(size: 26, weight: .bold))
+                .foregroundColor(.white)
+
+            Text("→  \(expiringInsuranceCount) INSURANCE WILL EXPIRE SOON")
+                .font(.system(size: 26, weight: .bold))
+                .foregroundColor(.white)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            LinearGradient(
+                colors: [Color(hex: "FF3B30"), Color(hex: "A9487B")],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -337,30 +488,30 @@ struct ManagerHomeView: View {
                 }
 
                 quickActionCell(
-                    icon: "person.fill.badge.plus",
+                    icon: "person.2.fill",
                     iconBg: Color(hex: "E4F5EA"),
-                    title: "Add Driver",
+                    title: "Manage Drivers",
                     subtitle: "Onboard and assign"
                 ) {
-                    showAddDriver = true
+                    showManageDrivers = true
                 }
 
                 quickActionCell(
-                    icon: "wrench.and.screwdriver.fill",
+                    icon: "chart.bar.fill",
                     iconBg: Color(hex: "FFF3E0"),
-                    title: "Log Service",
-                    subtitle: "Add or scan invoice"
+                    title: "Analytics",
+                    subtitle: "View all analysis reports"
                 ) {
-                    // Part 4
+                    showAnalytics = true
                 }
 
                 quickActionCell(
                     icon: "exclamationmark.triangle.fill",
                     iconBg: Color(hex: "FFEAEA"),
                     title: "View Faults",
-                    subtitle: "0 open"
+                    subtitle: "\(openFaultCount) open faults"
                 ) {
-                    // Part 7
+                    showFaults = true
                 }
             }
         }
@@ -461,6 +612,63 @@ struct ManagerHomeView: View {
 
         let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
         return "\(days) days remaining"
+    }
+
+    private func loadHomeMetrics() {
+        let serviceRequest = ServiceRecordEntity.fetchRequest()
+        let fuelRequest = FuelLogEntity.fetchRequest()
+
+        do {
+            let serviceRecords = try context.fetch(serviceRequest)
+            let fuelLogs = try context.fetch(fuelRequest)
+
+            let calendar = Calendar.current
+            let month = calendar.component(.month, from: Date())
+            let year = calendar.component(.year, from: Date())
+
+            let monthServiceCost = serviceRecords.filter {
+                guard let date = $0.date else { return false }
+                return calendar.component(.month, from: date) == month &&
+                    calendar.component(.year, from: date) == year
+            }
+            .reduce(0) { $0 + $1.costLKR }
+
+            let monthFuelCost = fuelLogs.filter {
+                guard let date = $0.date else { return false }
+                return calendar.component(.month, from: date) == month &&
+                    calendar.component(.year, from: date) == year
+            }
+            .reduce(0) { $0 + $1.totalCostLKR }
+
+            monthlySpend = monthServiceCost + monthFuelCost
+
+            let validEfficiencies = fuelLogs.filter { $0.kmPerLitre > 0 }
+            averageEfficiency = validEfficiencies.isEmpty
+                ? 0
+                : validEfficiencies.reduce(0) { $0 + $1.kmPerLitre } / Double(validEfficiencies.count)
+
+            if let bestFuel = validEfficiencies.max(by: { $0.kmPerLitre < $1.kmPerLitre }),
+               let id = bestFuel.vehicleId,
+               let vehicle = fleetViewModel.vehicles.first(where: { $0.id == id }) {
+                bestVehicleRegistration = vehicle.registration ?? "-"
+            } else {
+                bestVehicleRegistration = "-"
+            }
+        } catch {
+            monthlySpend = 0
+            averageEfficiency = 0
+            bestVehicleRegistration = "-"
+        }
+
+        let openFaultRequest = FaultReportEntity.fetchRequest()
+        openFaultRequest.predicate = NSPredicate(format: "status != %@", "resolved")
+        openFaultCount = (try? context.count(for: openFaultRequest)) ?? 0
+
+        expiringInsuranceCount = fleetViewModel.vehicles.filter { vehicle in
+            guard let expiry = vehicle.insuranceExpiry else { return false }
+            let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+            return days >= 0 && days <= 30
+        }.count
     }
 }
 

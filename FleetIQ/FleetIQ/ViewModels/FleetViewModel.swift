@@ -32,10 +32,19 @@ class FleetViewModel: ObservableObject {
         errorMessage = ""
         isLoading = true
 
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            stopListening()
+            vehicles = []
+            errorMessage = "Fleet ID is missing for this account."
+            isLoading = false
+            return
+        }
+
         fetchFromCoreData()
         stopListening()
 
-        listener = firestoreService.listenToVehicles(fleetId: fleetId) { [weak self] docs in
+        listener = firestoreService.listenToVehicles(fleetId: normalizedFleetId) { [weak self] docs in
             Task { @MainActor in
                 self?.syncFromFirestore(docs)
             }
@@ -98,6 +107,8 @@ class FleetViewModel: ObservableObject {
     ///   - currentMileage: Current odometer reading.
     ///   - insuranceExpiry: Optional insurance expiry date.
     ///   - licenceExpiry: Optional licence expiry date.
+    ///   - assignedDriverName: Optional assigned driver display name.
+    ///   - assignedDriverUserId: Optional assigned driver user/profile id.
     ///   - fleetId: Fleet identifier for Firestore path.
     func addVehicle(
         registration: String,
@@ -108,6 +119,8 @@ class FleetViewModel: ObservableObject {
         currentMileage: Double,
         insuranceExpiry: Date?,
         licenceExpiry: Date?,
+        assignedDriverName: String?,
+        assignedDriverUserId: String?,
         fleetId: String
     ) async {
         errorMessage = ""
@@ -128,7 +141,7 @@ class FleetViewModel: ObservableObject {
         vehicle.fuelType = fuelType
         vehicle.currentMileage = currentMileage
         vehicle.createdAt = createdAt
-        vehicle.assignedDriverId = nil
+        vehicle.assignedDriverId = assignedDriverName
         vehicle.insuranceExpiry = insuranceExpiry
         vehicle.licenceExpiry = licenceExpiry
 
@@ -143,7 +156,8 @@ class FleetViewModel: ObservableObject {
                 "year": Int(year),
                 "fuelType": fuelType,
                 "currentMileage": currentMileage,
-                "createdAt": Timestamp(date: createdAt)
+                "createdAt": Timestamp(date: createdAt),
+                "assignedDriverId": assignedDriverName ?? ""
             ]
 
             if let insuranceExpiry {
@@ -159,6 +173,18 @@ class FleetViewModel: ObservableObject {
             }
 
             try await firestoreService.saveVehicle(payload, fleetId: fleetId, vehicleId: newId.uuidString)
+
+            if let driverUserId = assignedDriverUserId, !driverUserId.isEmpty {
+                try await firestoreService.updateDriverUserAssignment(
+                    userId: driverUserId,
+                    vehicleId: newId.uuidString
+                )
+                try await firestoreService.updateFleetDriverAssignment(
+                    fleetId: fleetId,
+                    driverId: driverUserId,
+                    vehicleId: newId.uuidString
+                )
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

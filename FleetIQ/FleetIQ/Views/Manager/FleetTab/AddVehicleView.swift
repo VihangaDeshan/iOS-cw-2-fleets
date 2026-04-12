@@ -60,9 +60,20 @@ struct AddVehicleView: View {
     @State private var licenceVerified = false
     @State private var emissionVerified = false
 
+    // MARK: - Driver Assignment State
+    @State private var drivers: [FleetDriverUser] = []
+    @State private var driverSearchText = ""
+    @State private var selectedDriverUserId = ""
+    @State private var selectedDriverName = ""
+    @State private var isLoadingDrivers = false
+    @State private var driverLoadError = ""
+    @State private var showManageDrivers = false
+
     // MARK: - Constants
     let fuelTypes = ["Diesel", "Petrol", "Hybrid", "Electric", "CNG"]
     let years = Array(2000...2026).reversed()
+
+    private let firestoreService = FirestoreService.shared
 
     // MARK: - Computed
 
@@ -70,6 +81,20 @@ struct AddVehicleView: View {
     private var requiresEmissionTest: Bool {
         let normalized = fuelType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalized != "hybrid" && normalized != "electric"
+    }
+
+    /// Returns drivers filtered by search text.
+    private var filteredDrivers: [FleetDriverUser] {
+        let query = driverSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return drivers
+        }
+
+        return drivers.filter { driver in
+            driver.name.localizedCaseInsensitiveContains(query) ||
+            driver.email.localizedCaseInsensitiveContains(query) ||
+            driver.phone.localizedCaseInsensitiveContains(query)
+        }
     }
 
     // MARK: - Body
@@ -208,6 +233,85 @@ struct AddVehicleView: View {
                     }
                 }
 
+                Section("ASSIGN DRIVER") {
+                    TextField("Search driver by name or email", text: $driverSearchText)
+
+                    if isLoadingDrivers {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("Loading drivers...")
+                                .foregroundColor(.secondary)
+                                .font(.subheadline)
+                        }
+                    } else if !driverLoadError.isEmpty {
+                        Text(driverLoadError)
+                            .font(.caption)
+                            .foregroundColor(.statusOverdue)
+                    }
+
+                    if filteredDrivers.isEmpty {
+                        Text("No drivers found for this fleet.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(filteredDrivers.prefix(6), id: \.userId) { driver in
+                            Button {
+                                if selectedDriverUserId == driver.userId {
+                                    selectedDriverUserId = ""
+                                    selectedDriverName = ""
+                                } else {
+                                    selectedDriverUserId = driver.userId
+                                    selectedDriverName = driver.name
+                                }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Circle()
+                                        .fill(Color.navyPrimary.opacity(0.15))
+                                        .frame(width: 34, height: 34)
+                                        .overlay(
+                                            Text(driverInitials(from: driver.name))
+                                                .font(.system(size: 12, weight: .bold))
+                                                .foregroundColor(.navyPrimary)
+                                        )
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(driver.name.isEmpty ? "Unnamed driver" : driver.name)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundColor(.primary)
+
+                                        Text(driver.email)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+
+                                    Spacer()
+
+                                    if selectedDriverUserId == driver.userId {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.navyPrimary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HStack {
+                        Button("Refresh Drivers") {
+                            Task {
+                                await loadDrivers()
+                            }
+                        }
+                        .font(.caption.weight(.semibold))
+
+                        Spacer()
+
+                        Button("Manage Drivers") {
+                            showManageDrivers = true
+                        }
+                        .font(.caption.weight(.semibold))
+                    }
+                }
+
                 Section("DOCUMENT EXPIRY DATES") {
                     Toggle("Insurance Certificate", isOn: $hasInsuranceDate)
 
@@ -295,6 +399,18 @@ struct AddVehicleView: View {
                 }
             }
             .disabled(isSaving)
+            .task(id: authViewModel.fleetId) {
+                await loadDrivers()
+            }
+            .sheet(isPresented: $showManageDrivers, onDismiss: {
+                Task {
+                    await loadDrivers()
+                }
+            }) {
+                ManageDriversView()
+                    .environmentObject(authViewModel)
+                    .environmentObject(fleetViewModel)
+            }
             .overlay {
                 if isSaving {
                     ProgressView("Saving...")
@@ -494,6 +610,8 @@ struct AddVehicleView: View {
             currentMileage: mileageValue,
             insuranceExpiry: hasInsuranceDate ? insuranceExpiry : nil,
             licenceExpiry: hasLicenceDate ? licenceExpiry : nil,
+            assignedDriverName: selectedDriverName.isEmpty ? nil : selectedDriverName,
+            assignedDriverUserId: selectedDriverUserId.isEmpty ? nil : selectedDriverUserId,
             fleetId: authViewModel.fleetId
         )
 
@@ -549,6 +667,47 @@ struct AddVehicleView: View {
             .padding(.vertical, 6)
             .background(Color(hex: "E8F0FB"))
             .clipShape(Capsule())
+    }
+
+    /// Loads fleet drivers from Firestore users collection where role is driver.
+    @MainActor
+    private func loadDrivers() async {
+        let normalizedFleetId = authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            drivers = []
+            selectedDriverUserId = ""
+            selectedDriverName = ""
+            driverLoadError = "Fleet ID is not ready yet. Please reopen this screen."
+            isLoadingDrivers = false
+            return
+        }
+
+        driverLoadError = ""
+        isLoadingDrivers = true
+
+        do {
+            drivers = try await firestoreService.fetchFleetDriverUsers(fleetId: normalizedFleetId)
+            if !selectedDriverUserId.isEmpty,
+               !drivers.contains(where: { $0.userId == selectedDriverUserId }) {
+                selectedDriverUserId = ""
+                selectedDriverName = ""
+            }
+        } catch {
+            driverLoadError = "Could not fetch fleet drivers."
+            drivers = []
+        }
+
+        isLoadingDrivers = false
+    }
+
+    /// Generates two-letter initials from a driver name.
+    private func driverInitials(from name: String) -> String {
+        let parts = name.split(separator: " ")
+        if parts.count >= 2 {
+            return (String(parts[0].prefix(1)) + String(parts[1].prefix(1))).uppercased()
+        }
+
+        return String(name.prefix(2)).uppercased()
     }
 }
 

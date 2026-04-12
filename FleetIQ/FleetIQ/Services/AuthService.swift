@@ -8,6 +8,24 @@
 import Foundation
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseCore
+
+private func ensureFirebaseConfiguredForAuthService() {
+    if FirebaseApp.app() != nil {
+        return
+    }
+
+    if Thread.isMainThread {
+        FirebaseApp.configure()
+        return
+    }
+
+    DispatchQueue.main.sync {
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
+    }
+}
 
 // MARK: - Auth Service
 final class AuthService {
@@ -26,8 +44,14 @@ final class AuthService {
     // MARK: - Initializer
     /// Creates an AuthService with Firebase Auth and Firestore dependencies.
     init(
-        authProvider: @escaping () -> Auth = { Auth.auth() },
-        firestoreProvider: @escaping () -> Firestore = { Firestore.firestore() }
+        authProvider: @escaping () -> Auth = {
+            ensureFirebaseConfiguredForAuthService()
+            return Auth.auth()
+        },
+        firestoreProvider: @escaping () -> Firestore = {
+            ensureFirebaseConfiguredForAuthService()
+            return Firestore.firestore()
+        }
     ) {
         self.authProvider = authProvider
         self.firestoreProvider = firestoreProvider
