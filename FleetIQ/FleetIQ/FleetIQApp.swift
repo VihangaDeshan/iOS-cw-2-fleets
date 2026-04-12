@@ -54,7 +54,17 @@ struct FleetIQApp: App {
                 } else if faceIDEnabled && !isUnlocked {
                     LockScreenView()
                 } else if !authViewModel.isAuthenticated {
-                    RoleSelectionView()
+                    if faceIDEnabled {
+                        NavigationStack {
+                            LoginView(
+                                role: rememberedRoleForQuickLogin,
+                                showsBackButton: false,
+                                showChangeRoleAction: true
+                            )
+                        }
+                    } else {
+                        RoleSelectionView()
+                    }
                 } else if authViewModel.userRole.isEmpty {
                     AuthLoadingView()
                 } else if authViewModel.userRole == "manager" {
@@ -90,9 +100,15 @@ struct FleetIQApp: App {
 
 #if canImport(FirebaseFirestore)
         let settings = FirestoreSettings()
-    settings.cacheSettings = PersistentCacheSettings()
+        settings.cacheSettings = PersistentCacheSettings()
         Firestore.firestore().settings = settings
 #endif
+    }
+
+    /// Returns a valid role key for quick-login after Face Lock unlock.
+    private var rememberedRoleForQuickLogin: String {
+        let normalizedRole = lastSelectedRole.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalizedRole == "driver" ? "driver" : "manager"
     }
 
     /// Applies lock behavior for app lifecycle transitions.

@@ -11,6 +11,8 @@ import SwiftUI
 struct LoginView: View {
     // MARK: - Stored Properties
     let role: String
+    var showsBackButton: Bool = true
+    var showChangeRoleAction: Bool = false
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var authViewModel: AuthViewModel
@@ -33,12 +35,14 @@ struct LoginView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     HStack {
-                        Button(action: backTapped) {
-                            Image(systemName: "arrow.left")
-                                .font(.headline.bold())
-                                .foregroundStyle(Color.white.opacity(0.55))
-                                .padding(11)
-                                .background(Circle().fill(Color.white.opacity(0.28)))
+                        if showsBackButton {
+                            Button(action: backTapped) {
+                                Image(systemName: "arrow.left")
+                                    .font(.headline.bold())
+                                    .foregroundStyle(Color.white.opacity(0.55))
+                                    .padding(11)
+                                    .background(Circle().fill(Color.white.opacity(0.28)))
+                            }
                         }
 
                         Spacer()
@@ -186,6 +190,16 @@ struct LoginView: View {
                         }
                     }
                     .padding(.top, 28)
+
+                    if showChangeRoleAction {
+                        NavigationLink(destination: RoleSelectionView()) {
+                            Text("Switch role")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(Color.white.opacity(0.78))
+                                .underline()
+                        }
+                        .padding(.top, 8)
+                    }
 
                     if !authViewModel.errorMessage.isEmpty {
                         Text(authViewModel.errorMessage)

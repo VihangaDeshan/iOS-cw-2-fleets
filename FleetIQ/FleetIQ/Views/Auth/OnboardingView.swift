@@ -120,15 +120,17 @@ struct OnboardingView: View {
         let context = LAContext()
         var authError: NSError?
 
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &authError) else {
-            errorMessage = authError?.localizedDescription ?? "Face ID is not available on this device."
+        // Use deviceOwnerAuthentication so simulator/users can fall back to passcode
+        // instead of being blocked on biometric-only prompts.
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &authError) else {
+            errorMessage = authError?.localizedDescription ?? "Face ID or device authentication is not available on this device."
             return
         }
 
         isAuthenticating = true
 
         context.evaluatePolicy(
-            .deviceOwnerAuthenticationWithBiometrics,
+            .deviceOwnerAuthentication,
             localizedReason: "Enable Face ID to secure FleetIQ data"
         ) { success, evaluationError in
             DispatchQueue.main.async {
