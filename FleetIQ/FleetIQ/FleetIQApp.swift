@@ -68,7 +68,7 @@ struct FleetIQApp: App {
                 } else if authViewModel.userRole.isEmpty {
                     AuthLoadingView()
                 } else if authViewModel.userRole == "manager" {
-                    ManagerDashboardPlaceholderView()
+                    ManagerTabView()
                 } else {
                     DriverDashboardPlaceholderView()
                 }

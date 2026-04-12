@@ -1,0 +1,176 @@
+//
+//  VehicleCardView.swift
+//  FleetIQ
+//
+//  Created by Vihanga Deshan Sammandapperuma on 2026-04-12.
+//
+
+import SwiftUI
+import CoreData
+
+// MARK: - Vehicle Card View
+struct VehicleCardView: View {
+    // MARK: - Stored Properties
+    let vehicle: VehicleEntity
+    @EnvironmentObject var fleetViewModel: FleetViewModel
+
+    // MARK: - Computed Properties
+    var status: String {
+        fleetViewModel.vehicleStatus(vehicle)
+    }
+
+    var days: Int {
+        fleetViewModel.daysUntilService(vehicle)
+    }
+
+    var daysText: String {
+        if days < 0 {
+            return "\(abs(days)) days overdue"
+        } else if days == 0 {
+            return "Due today"
+        } else {
+            return "Service in \(days) days"
+        }
+    }
+
+    var daysColour: Color {
+        switch status {
+        case "Overdue":
+            return .statusOverdue
+        case "Due Soon":
+            return .statusDueSoon
+        default:
+            return Color.secondary
+        }
+    }
+
+    var progressValue: Double {
+        let interval = fleetViewModel.predictedNextServiceMileage(vehicle) - (vehicle.currentMileage - 5000)
+        guard interval > 0 else {
+            return 1.0
+        }
+
+        let used = 5000.0 - Double(days) * 15.0
+        return min(max(used / interval, 0), 1.0)
+    }
+
+    var progressBarColour: Color {
+        switch status {
+        case "Overdue":
+            return .statusOverdue
+        case "Due Soon":
+            return .statusDueSoon
+        default:
+            return .statusActive
+        }
+    }
+
+    // MARK: - Body
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(vehicle.registration ?? "Unknown")
+                    .font(.system(size: 15, weight: .bold))
+                    .tracking(0.5)
+
+                VehicleStatusChip(status: status)
+
+                Spacer()
+
+                Text(daysText)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(daysColour)
+            }
+
+            Text("\(vehicle.make ?? "") \(vehicle.model ?? "") · \(vehicle.year)")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 3)
+
+            HStack {
+                Circle()
+                    .fill(Color.navyPrimary)
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Text(initials(vehicle.assignedDriverId ?? "?"))
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white)
+                    )
+
+                Text(vehicle.assignedDriverId ?? "Unassigned")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                NavigationLink {
+                    Text("Vehicle Detail - Part 4")
+                } label: {
+                    Text("Details ›")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.navyPrimary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color(hex: "E8F0FB"))
+                        .cornerRadius(7)
+                }
+                .accessibilityLabel("View details for \(vehicle.registration ?? "")")
+            }
+            .padding(.top, 6)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color(.systemGray5))
+                        .frame(height: 4)
+
+                    Capsule()
+                        .fill(progressBarColour)
+                        .frame(width: geo.size.width * progressValue, height: 4)
+                }
+            }
+            .frame(height: 4)
+            .padding(.top, 7)
+        }
+        .padding(12)
+        .background(Color.white)
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+    }
+
+    // MARK: - Helpers
+    /// Returns two-letter initials from a name string.
+    /// - Parameter name: Name string to shorten.
+    /// - Returns: Two-letter uppercase initials.
+    func initials(_ name: String) -> String {
+        let parts = name.split(separator: " ")
+
+        if parts.count >= 2 {
+            return String(parts[0].prefix(1)) + String(parts[1].prefix(1))
+        }
+
+        return String(name.prefix(2)).uppercased()
+    }
+}
+
+#Preview {
+    let context = PersistenceController.preview.viewContext
+    let sample = VehicleEntity(context: context)
+    sample.id = UUID()
+    sample.registration = "CAB-1234"
+    sample.make = "Toyota"
+    sample.model = "KDH"
+    sample.year = 2018
+    sample.currentMileage = 120000
+    sample.fuelType = "Diesel"
+    sample.createdAt = Date()
+    sample.assignedDriverId = "Kamal Silva"
+
+    return NavigationStack {
+        VehicleCardView(vehicle: sample)
+            .environmentObject(FleetViewModel())
+            .padding()
+            .background(Color.systemGroupedBg)
+    }
+}
