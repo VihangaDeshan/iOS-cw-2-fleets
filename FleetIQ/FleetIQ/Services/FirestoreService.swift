@@ -229,8 +229,26 @@ class FirestoreService {
         }
         let ref = Storage.storage().reference().child(path)
         let _ = try await ref.putDataAsync(data)
-        let url = try await ref.downloadURL()
-        return url.absoluteString
+
+        // Storage can briefly return "object does not exist" immediately after upload.
+        var lastError: Error?
+        for attempt in 1...4 {
+            do {
+                let url = try await ref.downloadURL()
+                return url.absoluteString
+            } catch {
+                lastError = error
+                if attempt < 4 {
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 300_000_000)
+                }
+            }
+        }
+
+        throw lastError ?? NSError(
+            domain: "FleetIQ",
+            code: -3,
+            userInfo: [NSLocalizedDescriptionKey: "Photo upload completed but URL retrieval failed."]
+        )
     }
 
     /// Builds the Firebase Storage path for a fault report photo.
@@ -241,6 +259,15 @@ class FirestoreService {
         filename: String
     ) -> String {
         "fleets/\(fleetId)/faults/\(faultId)/\(filename).jpg"
+    }
+
+    /// Builds default Firebase Storage path for a fault report photo.
+    /// Path format: fleets/{fleetId}/faults/{faultId}/photo.jpg
+    func faultPhotoPath(
+        fleetId: String,
+        faultId: String
+    ) -> String {
+        "fleets/\(fleetId)/faults/\(faultId)/photo.jpg"
     }
 
     /// Builds the Firebase Storage path for a document-vault photo.
@@ -397,6 +424,121 @@ class FirestoreService {
     }
 
     // MARK: - Fault Reports
+
+    /// Saves a fault report document to fleets/{fleetId}/faultReports/{faultId}.
+    /// - Parameters:
+    ///   - data: Fault report payload.
+    ///   - fleetId: Fleet document identifier.
+    ///   - faultId: Fault-report identifier.
+    func saveFaultReport(
+        _ data: [String: Any],
+        fleetId: String,
+        faultId: String
+    ) async throws {
+        var payload = data
+        payload["id"] = payload["id"] ?? faultId
+        payload["updatedAt"] = Timestamp(date: Date())
+
+        if payload["createdAt"] == nil {
+            payload["createdAt"] = Timestamp(date: Date())
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("faultReports")
+                .document(faultId)
+                .setData(payload, merge: true) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Updates only the status field on a fault report document.
+    /// Path: fleets/{fleetId}/faultReports/{faultId}
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - faultId: Fault-report identifier.
+    ///   - status: New fault status value.
+    func updateFaultStatus(
+        fleetId: String,
+        faultId: String,
+        status: String
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("faultReports")
+                .document(faultId)
+                .updateData([
+                    "status": status,
+                    "updatedAt": Timestamp(date: Date())
+                ]) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Starts a real-time listener for all fault reports in a fleet.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - onUpdate: Callback invoked with latest fault-report documents.
+    /// - Returns: Active listener registration.
+    func listenToFaultReports(
+        fleetId: String,
+        onUpdate: @escaping ([QueryDocumentSnapshot]) -> Void
+    ) -> ListenerRegistration {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            onUpdate([])
+            return NoOpListenerRegistration()
+        }
+
+        return db.collection("fleets")
+            .document(normalizedFleetId)
+            .collection("faultReports")
+            .addSnapshotListener { snapshot, _ in
+                onUpdate(snapshot?.documents ?? [])
+            }
+    }
+
+    /// Starts a real-time listener for one driver's fault reports in a fleet.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - driverId: Driver identifier.
+    ///   - onUpdate: Callback invoked with latest driver-specific fault documents.
+    /// - Returns: Active listener registration.
+    func listenToMyFaults(
+        fleetId: String,
+        driverId: String,
+        onUpdate: @escaping ([QueryDocumentSnapshot]) -> Void
+    ) -> ListenerRegistration {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDriverId = driverId.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedFleetId.isEmpty, !normalizedDriverId.isEmpty else {
+            onUpdate([])
+            return NoOpListenerRegistration()
+        }
+
+        return db.collection("fleets")
+            .document(normalizedFleetId)
+            .collection("faultReports")
+            .whereField("driverId", isEqualTo: normalizedDriverId)
+            .addSnapshotListener { snapshot, _ in
+                onUpdate(snapshot?.documents ?? [])
+            }
+    }
 
     /// Updates an existing fault report document.
     /// Path: fleets/{fleetId}/faultReports/{faultId}

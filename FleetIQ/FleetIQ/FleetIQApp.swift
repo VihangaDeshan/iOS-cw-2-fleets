@@ -64,7 +64,7 @@ struct FleetIQApp: App {
     @AppStorage("lastSelectedRole") private var lastSelectedRole: String = "manager"
 
     // MARK: - Initializer
-    /// Configures Firebase services during app launch.
+    /// Creates app-level state objects.
     init() {
         configureFirebaseIfAvailable()
         _authViewModel = StateObject(wrappedValue: AuthViewModel())
@@ -105,6 +105,9 @@ struct FleetIQApp: App {
             }
             .environmentObject(authViewModel)
             .environment(\.managedObjectContext, persistenceController.container.viewContext)
+            .task {
+                authViewModel.startAuthStateListenerIfNeeded()
+            }
             .onChange(of: scenePhase) { _, phase in
                 handleScenePhaseChange(phase)
             }

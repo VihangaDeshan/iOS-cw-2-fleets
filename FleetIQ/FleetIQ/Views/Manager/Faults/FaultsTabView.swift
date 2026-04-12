@@ -6,18 +6,17 @@
 //
 
 import SwiftUI
-import CoreData
-import FirebaseFirestore
 
 // MARK: - Faults Tab View
 struct FaultsTabView: View {
-    @Environment(\.managedObjectContext) private var context
     @EnvironmentObject private var authViewModel: AuthViewModel
+    @StateObject private var faultViewModel = FaultViewModel()
 
-    @State private var faults: [FaultReportEntity] = []
     @State private var errorText = ""
 
-    private let firestoreService = FirestoreService.shared
+    private var normalizedFleetId: String {
+        authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     var body: some View {
         NavigationStack {
@@ -30,17 +29,38 @@ struct FaultsTabView: View {
                     }
                 }
 
-                if faults.isEmpty {
-                    ContentUnavailableView(
-                        "No Fault Reports",
-                        systemImage: "exclamationmark.triangle",
-                        description: Text("Driver reported faults will appear here")
-                    )
+                if normalizedFleetId.isEmpty {
+                    Section {
+                        ContentUnavailableView(
+                            "Fleet Not Ready",
+                            systemImage: "building.2.crop.circle",
+                            description: Text("Manager account is missing fleet configuration.")
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                } else if faultViewModel.faultReports.isEmpty {
+                    Section {
+                        ContentUnavailableView(
+                            "No Fault Reports",
+                            systemImage: "exclamationmark.triangle",
+                            description: Text("Driver reported faults will appear here.")
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
                 } else {
-                    ForEach(faults, id: \.id) { fault in
-                        row(for: fault)
+                    Section {
+                        ForEach(faultViewModel.faultReports, id: \.id) { fault in
+                            NavigationLink {
+                                ManagerFaultDetailView(
+                                    fault: fault,
+                                    fleetId: normalizedFleetId,
+                                    faultViewModel: faultViewModel
+                                )
+                            } label: {
+                                faultRow(for: fault)
+                            }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                if (fault.status ?? "").lowercased() == "resolved" {
+                                if isResolved(fault.status ?? "") {
                                     Button("Reopen") {
                                         Task {
                                             await updateStatus(for: fault, status: "open")
@@ -56,100 +76,264 @@ struct FaultsTabView: View {
                                     .tint(.statusActive)
                                 }
                             }
+                        }
+                    } header: {
+                        Text("\(faultViewModel.faultReports.count) report(s)")
                     }
                 }
             }
+            .listStyle(.insetGrouped)
             .navigationTitle("Faults")
             .navigationBarTitleDisplayMode(.inline)
-            .onAppear(perform: loadFaults)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Text("Open: \(faultViewModel.openFaultCount)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.statusOverdue)
+                        .clipShape(Capsule())
+                }
+            }
+            .task(id: normalizedFleetId) {
+                guard !normalizedFleetId.isEmpty else {
+                    return
+                }
+
+                errorText = ""
+                faultViewModel.startFaultListener(fleetId: normalizedFleetId)
+            }
+            .refreshable {
+                guard !normalizedFleetId.isEmpty else {
+                    return
+                }
+
+                errorText = ""
+                faultViewModel.startFaultListener(fleetId: normalizedFleetId)
+            }
         }
     }
 
-    private func row(for fault: FaultReportEntity) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+    private func faultRow(for fault: FaultReportEntity) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .top, spacing: 8) {
                 Text(fault.descriptionText ?? "Fault")
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
 
-                Spacer()
+                Spacer(minLength: 8)
 
                 statusChip(status: fault.status ?? "open")
             }
 
             Text(
-                "Urgency: \((fault.urgency ?? "medium").capitalized)  ·  " +
-                mediumDate(fault.createdAt ?? Date())
+                "Urgency: \((fault.urgency ?? "medium").capitalized)  ·  \(mediumDate(fault.createdAt))"
             )
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
 
-            if let photoURL = fault.photoURL, !photoURL.isEmpty {
+            if let photoURL = fault.photoURL,
+               photoURL.hasPrefix("http") {
                 Text("Photo attached")
                     .font(.caption2.weight(.semibold))
                     .foregroundColor(.statusActive)
+            } else if (fault.photoURL ?? "") == "upload_failed" {
+                Text("Photo upload failed")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(.chipOrangeText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.chipOrangeBg)
+                    .clipShape(Capsule())
+            } else {
+                Text("No photo attached")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 3)
     }
 
     private func statusChip(status: String) -> some View {
-        let lower = status.lowercased()
-        let color: Color = lower == "resolved" ? .statusActive : .statusOverdue
+        let resolved = isResolved(status)
+        let color: Color = resolved ? .statusActive : .statusOverdue
 
-        return Text(status.capitalized)
+        return Text(resolved ? "Resolved" : "Open")
             .font(.caption2.weight(.bold))
-            .foregroundColor(color)
+            .foregroundStyle(color)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(color.opacity(0.12))
             .clipShape(Capsule())
     }
 
-    private func loadFaults() {
-        errorText = ""
-
-        let request = FaultReportEntity.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
-
-        do {
-            faults = try context.fetch(request)
-        } catch {
-            faults = []
-        }
+    private func isResolved(_ status: String) -> Bool {
+        status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "resolved"
     }
 
     private func updateStatus(for fault: FaultReportEntity, status: String) async {
-        errorText = ""
-        guard let faultId = fault.id?.uuidString else {
-            errorText = "Fault ID is missing."
+        guard !normalizedFleetId.isEmpty else {
+            errorText = "Fleet ID is missing."
             return
         }
 
-        let previous = fault.status
-        fault.status = status
-
         do {
-            try context.save()
-            try await firestoreService.updateFaultReport(
-                fleetId: authViewModel.fleetId,
-                faultId: faultId,
-                data: [
-                    "status": status,
-                    "updatedAt": Timestamp(date: Date())
-                ]
+            try await faultViewModel.updateStatus(
+                fault: fault,
+                status: status,
+                fleetId: normalizedFleetId
             )
-            loadFaults()
+            errorText = ""
         } catch {
-            fault.status = previous
             errorText = "Could not update fault status in cloud."
         }
     }
 
-    private func mediumDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+    private func mediumDate(_ date: Date?) -> String {
+        guard let date else {
+            return "Unknown"
+        }
+
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+// MARK: - Manager Fault Detail
+private struct ManagerFaultDetailView: View {
+    let fault: FaultReportEntity
+    let fleetId: String
+
+    @ObservedObject var faultViewModel: FaultViewModel
+
+    @State private var isUpdating = false
+    @State private var errorText = ""
+
+    var body: some View {
+        List {
+            Section("Summary") {
+                detailRow("Status", value: (fault.status ?? "open").capitalized)
+                detailRow("Urgency", value: (fault.urgency ?? "medium").capitalized)
+                detailRow("Reported", value: formattedDate(fault.createdAt))
+                detailRow("Driver ID", value: fault.driverId ?? "-")
+                detailRow("Vehicle ID", value: fault.vehicleId?.uuidString ?? "-")
+            }
+
+            Section("Description") {
+                Text(fault.descriptionText ?? "No description")
+                    .font(.body)
+            }
+
+                if let photoURL = fault.photoURL,
+                    photoURL.hasPrefix("http"),
+                    let url = URL(string: photoURL) {
+                Section("Photo") {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFit()
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        case .failure(_):
+                            Text("Could not load photo preview")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        case .empty:
+                            HStack {
+                                Spacer()
+                                ProgressView()
+                                Spacer()
+                            }
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
+                }
+            } else if (fault.photoURL ?? "") == "upload_failed" {
+                Section("Photo") {
+                    Text("Photo upload failed for this report.")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.chipOrangeText)
+                }
+            } else {
+                Section("Photo") {
+                    Text("No photo attached.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Location") {
+                Text(String(format: "%.6f, %.6f", fault.latitude, fault.longitude))
+                    .font(.body.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            if !errorText.isEmpty {
+                Section {
+                    Text(errorText)
+                        .font(.footnote)
+                        .foregroundColor(.statusOverdue)
+                }
+            }
+
+            Section {
+                Button {
+                    Task {
+                        await toggleStatus()
+                    }
+                } label: {
+                    HStack {
+                        if isUpdating {
+                            ProgressView()
+                        }
+
+                        Text((fault.status ?? "open").lowercased() == "resolved" ? "Reopen Fault" : "Mark Resolved")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(isUpdating)
+            }
+        }
+        .navigationTitle("Fault Detail")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func detailRow(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func toggleStatus() async {
+        isUpdating = true
+        defer { isUpdating = false }
+
+        let nextStatus = (fault.status ?? "open").lowercased() == "resolved" ? "open" : "resolved"
+
+        do {
+            try await faultViewModel.updateStatus(
+                fault: fault,
+                status: nextStatus,
+                fleetId: fleetId
+            )
+            errorText = ""
+        } catch {
+            errorText = "Failed to update status."
+        }
+    }
+
+    private func formattedDate(_ date: Date?) -> String {
+        guard let date else {
+            return "Unknown"
+        }
+
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }

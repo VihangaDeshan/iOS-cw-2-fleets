@@ -9,24 +9,6 @@ import Foundation
 import Combine
 import FirebaseAuth
 import FirebaseFirestore
-import FirebaseCore
-
-private func ensureFirebaseConfiguredForAuthViewModel() {
-    if FirebaseApp.app() != nil {
-        return
-    }
-
-    if Thread.isMainThread {
-        FirebaseApp.configure()
-        return
-    }
-
-    DispatchQueue.main.sync {
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure()
-        }
-    }
-}
 
 // MARK: - Auth View Model
 @MainActor
@@ -44,6 +26,7 @@ final class AuthViewModel: ObservableObject {
     private let authService: AuthService
     private let firestoreProvider: () -> Firestore
     private var authStateHandle: AuthStateDidChangeListenerHandle?
+    private var didStartAuthStateListener: Bool = false
 
     // MARK: - Initializer
     /// Creates the AuthViewModel and starts listening to Firebase authentication state changes.
@@ -51,9 +34,17 @@ final class AuthViewModel: ObservableObject {
         authService: AuthService? = nil,
         firestoreProvider: @escaping () -> Firestore = { Firestore.firestore() }
     ) {
-        ensureFirebaseConfiguredForAuthViewModel()
         self.authService = authService ?? AuthService()
         self.firestoreProvider = firestoreProvider
+    }
+
+    /// Starts Firebase Auth state observation after app launch has configured Firebase.
+    func startAuthStateListenerIfNeeded() {
+        guard !didStartAuthStateListener else {
+            return
+        }
+
+        didStartAuthStateListener = true
         startAuthStateListener()
     }
 
@@ -151,7 +142,6 @@ final class AuthViewModel: ObservableObject {
     // MARK: - Private Methods
     /// Starts Firebase Auth state observation for login and logout updates.
     private func startAuthStateListener() {
-        ensureFirebaseConfiguredForAuthViewModel()
         authStateHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             guard let self else {
                 return
