@@ -21,6 +21,7 @@ struct AddDriverView: View {
     @State private var selectedVehicleId: UUID?
     @State private var errorText = ""
     @State private var isSaving = false
+    @State private var showAddVehicle = false
 
     private let firestoreService = FirestoreService.shared
 
@@ -45,6 +46,11 @@ struct AddDriverView: View {
                                 .tag(vehicle.id)
                         }
                     }
+
+                    Button("Add Vehicle First") {
+                        showAddVehicle = true
+                    }
+                    .font(.caption.weight(.semibold))
                 }
 
                 if !errorText.isEmpty {
@@ -75,6 +81,11 @@ struct AddDriverView: View {
                 }
             }
             .disabled(isSaving)
+            .sheet(isPresented: $showAddVehicle) {
+                AddVehicleView()
+                    .environmentObject(fleetViewModel)
+                    .environmentObject(authViewModel)
+            }
         }
     }
 
@@ -99,7 +110,21 @@ struct AddDriverView: View {
         isSaving = true
 
         do {
-            let payload: [String: Any] = [
+            let userPayload: [String: Any] = [
+                "name": normalizedName,
+                "email": normalizedEmail,
+                "phone": normalizedPhone,
+                "fleetId": authViewModel.fleetId,
+                "assignedVehicleId": selectedVehicleId?.uuidString ?? "",
+                "createdByManager": true
+            ]
+
+            try await firestoreService.saveDriverUserProfile(
+                userId: driverId.uuidString,
+                data: userPayload
+            )
+
+            let fleetDriverPayload: [String: Any] = [
                 "id": driverId.uuidString,
                 "name": normalizedName,
                 "email": normalizedEmail,
@@ -108,19 +133,24 @@ struct AddDriverView: View {
             ]
 
             try await firestoreService.saveDriver(
-                payload,
+                fleetDriverPayload,
                 fleetId: authViewModel.fleetId,
                 driverId: driverId.uuidString
             )
 
-            if let selectedVehicleId,
-               let vehicle = fleetViewModel.vehicles.first(where: { $0.id == selectedVehicleId }) {
+            if let assignedVehicleId = selectedVehicleId,
+               let vehicle = fleetViewModel.vehicles.first(where: { $0.id == assignedVehicleId }) {
                 try await firestoreService.updateVehicle(
                     fleetId: authViewModel.fleetId,
-                    vehicleId: selectedVehicleId.uuidString,
+                    vehicleId: assignedVehicleId.uuidString,
                     data: ["assignedDriverId": normalizedName]
                 )
                 vehicle.assignedDriverId = normalizedName
+
+                try await firestoreService.updateDriverUserAssignment(
+                    userId: driverId.uuidString,
+                    vehicleId: assignedVehicleId.uuidString
+                )
             }
 
             let driver = DriverEntity(context: context)

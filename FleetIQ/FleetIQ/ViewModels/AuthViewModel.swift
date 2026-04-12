@@ -9,6 +9,24 @@ import Foundation
 import Combine
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseCore
+
+private func ensureFirebaseConfiguredForAuthViewModel() {
+    if FirebaseApp.app() != nil {
+        return
+    }
+
+    if Thread.isMainThread {
+        FirebaseApp.configure()
+        return
+    }
+
+    DispatchQueue.main.sync {
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
+    }
+}
 
 // MARK: - Auth View Model
 @MainActor
@@ -31,6 +49,7 @@ final class AuthViewModel: ObservableObject {
         authService: AuthService? = nil,
         firestoreProvider: @escaping () -> Firestore = { Firestore.firestore() }
     ) {
+        ensureFirebaseConfiguredForAuthViewModel()
         self.authService = authService ?? AuthService()
         self.firestoreProvider = firestoreProvider
         startAuthStateListener()
@@ -130,6 +149,7 @@ final class AuthViewModel: ObservableObject {
     // MARK: - Private Methods
     /// Starts Firebase Auth state observation for login and logout updates.
     private func startAuthStateListener() {
+        ensureFirebaseConfiguredForAuthViewModel()
         authStateHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             guard let self else {
                 return
@@ -168,8 +188,22 @@ final class AuthViewModel: ObservableObject {
 
         for attempt in 1...maxAttempts {
             do {
-                userRole = try await authService.fetchUserRole(uid: uid)
-                fleetId = try await fetchFleetId(uid: uid)
+                let resolvedRole = try await authService.fetchUserRole(uid: uid)
+                let resolvedFleetId = try await fetchFleetId(uid: uid)
+                let normalizedRole = resolvedRole.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let normalizedFleetId = resolvedFleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if normalizedRole == "manager" && normalizedFleetId.isEmpty {
+                    throw NSError(
+                        domain: "AuthViewModel",
+                        code: -11,
+                        userInfo: [NSLocalizedDescriptionKey: "Manager account is missing fleet setup. Please contact support or register again."]
+                    )
+                }
+
+                fleetId = normalizedFleetId
+                userRole = normalizedRole
+                errorMessage = ""
                 return
             } catch {
                 if attempt < maxAttempts {
@@ -178,6 +212,15 @@ final class AuthViewModel: ObservableObject {
                 }
 
                 errorMessage = error.localizedDescription
+
+                // Prevent UI navigation into role-specific flows with incomplete profile metadata.
+                do {
+                    try authService.signOut()
+                } catch {
+                    // Keep original metadata error if local sign out also fails.
+                }
+
+                resetAuthState()
             }
         }
     }
@@ -185,7 +228,9 @@ final class AuthViewModel: ObservableObject {
     /// Fetches the fleetId field from users/{uid} in Firestore.
     private func fetchFleetId(uid: String) async throws -> String {
         let document = try await firestoreProvider().collection("users").document(uid).getDocument()
-        let value = document.data()?["fleetId"] as? String ?? ""
+        let value = (document.data()?["fleetId"] as? String)
+            ?? (document.data()?["fleetID"] as? String)
+            ?? ""
         return value
     }
 

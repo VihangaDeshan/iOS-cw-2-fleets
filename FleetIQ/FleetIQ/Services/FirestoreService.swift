@@ -9,6 +9,24 @@ import Foundation
 import FirebaseFirestore
 import FirebaseStorage
 import UIKit
+#if canImport(FirebaseCore)
+import FirebaseCore
+#endif
+
+// MARK: - Fleet Driver User Model
+struct FleetDriverUser {
+    let userId: String
+    let name: String
+    let email: String
+    let phone: String
+    let fleetId: String
+    let role: String
+    let assignedVehicleId: String
+}
+
+private final class NoOpListenerRegistration: NSObject, ListenerRegistration {
+    func remove() {}
+}
 
 // MARK: - Firestore Service
 class FirestoreService {
@@ -16,11 +34,16 @@ class FirestoreService {
     static let shared = FirestoreService()
 
     // MARK: - Private Properties
-    private let db = Firestore.firestore()
+    private lazy var db: Firestore = {
+        Self.ensureFirebaseConfigured()
+        return Firestore.firestore()
+    }()
 
     // MARK: - Initializer
     /// Creates a Firestore service instance.
-    private init() {}
+    private init() {
+        Self.ensureFirebaseConfigured()
+    }
 
     // MARK: - Vehicles
 
@@ -61,8 +84,14 @@ class FirestoreService {
         fleetId: String,
         onUpdate: @escaping ([QueryDocumentSnapshot]) -> Void
     ) -> ListenerRegistration {
-        db.collection("fleets")
-            .document(fleetId)
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            onUpdate([])
+            return NoOpListenerRegistration()
+        }
+
+        return db.collection("fleets")
+            .document(normalizedFleetId)
             .collection("vehicles")
             .addSnapshotListener { snapshot, _ in
                 guard let documents = snapshot?.documents else {
@@ -420,6 +449,85 @@ class FirestoreService {
         }
     }
 
+    // MARK: - Driver Users
+
+    /// Fetches all drivers linked to a fleet.
+    /// Source: fleets/{fleetId}/drivers/{driverId}
+    /// - Parameter fleetId: Fleet identifier used to scope users.
+    /// - Returns: Driver users for assignment UIs.
+    func fetchFleetDriverUsers(fleetId: String) async throws -> [FleetDriverUser] {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[FleetDriverUser], Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("drivers")
+                .getDocuments { snapshot, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    let fleetDrivers = self.mapFleetDriverDocsToFleetDrivers(snapshot?.documents ?? [], fleetId: fleetId)
+                    continuation.resume(returning: fleetDrivers)
+                }
+        }
+    }
+
+    /// Creates or updates a manager-created driver profile in users collection.
+    /// Role is forced to `driver` to support role-based assignment filtering.
+    /// - Parameters:
+    ///   - userId: Driver profile identifier.
+    ///   - data: Driver profile fields.
+    func saveDriverUserProfile(
+        userId: String,
+        data: [String: Any]
+    ) async throws {
+        var payload = data
+        payload["role"] = "driver"
+        payload["updatedAt"] = Timestamp(date: Date())
+
+        if payload["createdAt"] == nil {
+            payload["createdAt"] = Timestamp(date: Date())
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("users")
+                .document(userId)
+                .setData(payload, merge: true) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Updates assignedVehicleId for a user profile.
+    /// - Parameters:
+    ///   - userId: User document identifier.
+    ///   - vehicleId: Assigned vehicle identifier, empty to clear assignment.
+    func updateDriverUserAssignment(
+        userId: String,
+        vehicleId: String
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("users")
+                .document(userId)
+                .updateData([
+                    "assignedVehicleId": vehicleId,
+                    "updatedAt": Timestamp(date: Date())
+                ]) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
     // MARK: - Private Helpers
 
     /// Builds a strict Firestore payload for vehicle documents.
@@ -508,12 +616,55 @@ class FirestoreService {
     private func driverPayload(from data: [String: Any], driverId: String) -> [String: Any] {
         return [
             "id": driverId,
+            "role": "driver",
             "name": data["name"] as? String ?? "",
             "email": data["email"] as? String ?? "",
             "phone": data["phone"] as? String ?? "",
             "assignedVehicleId": data["assignedVehicleId"] as? String ?? "",
-            "createdAt": FieldValue.serverTimestamp()
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
         ]
+    }
+
+    /// Ensures the default Firebase app is configured before using Firestore.
+    private static func ensureFirebaseConfigured() {
+#if canImport(FirebaseCore)
+        if FirebaseApp.app() == nil {
+            if Thread.isMainThread {
+                FirebaseApp.configure()
+            } else {
+                DispatchQueue.main.sync {
+                    if FirebaseApp.app() == nil {
+                        FirebaseApp.configure()
+                    }
+                }
+            }
+        }
+#endif
+    }
+
+    /// Maps fleet drivers collection docs into fleet-driver models.
+    private func mapFleetDriverDocsToFleetDrivers(_ docs: [QueryDocumentSnapshot], fleetId: String) -> [FleetDriverUser] {
+        docs.compactMap { doc in
+            let data = doc.data()
+            let role = (data["role"] as? String ?? "driver").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard role == "driver" else {
+                return nil
+            }
+
+            return FleetDriverUser(
+                userId: doc.documentID,
+                name: data["name"] as? String ?? "",
+                email: data["email"] as? String ?? "",
+                phone: data["phone"] as? String ?? "",
+                fleetId: fleetId,
+                role: role,
+                assignedVehicleId: data["assignedVehicleId"] as? String ?? ""
+            )
+        }
+        .sorted { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
     }
 
     /// Converts optional date-like values into Firestore-compatible values.

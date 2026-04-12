@@ -49,8 +49,28 @@ struct ManagerTabView: View {
         .accentColor(.navyPrimary)
         .environmentObject(fleetViewModel)
         .onAppear {
-            fleetViewModel.loadVehicles(fleetId: authViewModel.fleetId)
+            startVehicleSyncIfPossible()
         }
+        .onChange(of: authViewModel.fleetId) { _, _ in
+            startVehicleSyncIfPossible()
+        }
+        .onDisappear {
+            fleetViewModel.stopListening()
+        }
+    }
+
+    // MARK: - Private Methods
+    /// Starts vehicle sync only when a valid fleet id is available.
+    private func startVehicleSyncIfPossible() {
+        let normalizedFleetId = authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedFleetId.isEmpty else {
+            fleetViewModel.stopListening()
+            fleetViewModel.errorMessage = "Fleet setup is incomplete for this account."
+            return
+        }
+
+        fleetViewModel.loadVehicles(fleetId: normalizedFleetId)
     }
 }
 

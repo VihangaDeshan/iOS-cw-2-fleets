@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import UIKit
 #if canImport(Firebase)
 import Firebase
 #elseif canImport(FirebaseCore)
@@ -37,7 +38,7 @@ private func configureFirebaseIfAvailable() {
 }
 
 // MARK: - App Delegate
-final class AppDelegate: NSObject, UIApplicationDelegate {
+final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Handles launch-time setup for Firebase-backed services.
     func application(
         _ application: UIApplication,
