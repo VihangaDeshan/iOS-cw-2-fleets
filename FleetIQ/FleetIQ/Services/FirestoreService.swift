@@ -38,6 +38,7 @@ class FirestoreService {
         Self.ensureFirebaseConfigured()
         return Firestore.firestore()
     }()
+    private var canQueryUsersCollectionForDrivers = true
 
     // MARK: - Initializer
     /// Creates a Firestore service instance.
@@ -456,20 +457,41 @@ class FirestoreService {
     /// - Parameter fleetId: Fleet identifier used to scope users.
     /// - Returns: Driver users for assignment UIs.
     func fetchFleetDriverUsers(fleetId: String) async throws -> [FleetDriverUser] {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[FleetDriverUser], Error>) in
-            db.collection("fleets")
-                .document(fleetId)
-                .collection("drivers")
-                .getDocuments { snapshot, error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                        return
-                    }
-
-                    let fleetDrivers = self.mapFleetDriverDocsToFleetDrivers(snapshot?.documents ?? [], fleetId: fleetId)
-                    continuation.resume(returning: fleetDrivers)
-                }
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            return []
         }
+
+        let fleetCollectionDocs = try await fetchDocuments(
+            for: db.collection("fleets")
+                .document(normalizedFleetId)
+                .collection("drivers")
+        )
+
+        let usersByFleetIdDocs = await fetchUserDriverDocsIfAllowed(
+            for: db.collection("users")
+                .whereField("fleetId", isEqualTo: normalizedFleetId)
+        )
+        let usersByLegacyFleetIdDocs = await fetchUserDriverDocsIfAllowed(
+            for: db.collection("users")
+                .whereField("fleetID", isEqualTo: normalizedFleetId)
+        )
+        let usersByFleetNameDocs = await fetchUserDriverDocsIfAllowed(
+            for: db.collection("users")
+                .whereField("fleetName", isEqualTo: normalizedFleetId)
+        )
+
+        let fleetDrivers = mapFleetDriverDocsToFleetDrivers(fleetCollectionDocs, fleetId: normalizedFleetId)
+        let driversFromUsersByFleetId = mapUserDocsToFleetDrivers(usersByFleetIdDocs, fleetId: normalizedFleetId)
+        let driversFromUsersByLegacyFleetId = mapUserDocsToFleetDrivers(usersByLegacyFleetIdDocs, fleetId: normalizedFleetId)
+        let driversFromUsersByFleetName = mapUserDocsToFleetDrivers(usersByFleetNameDocs, fleetId: normalizedFleetId)
+
+        return mergeFleetDriverLists([
+            fleetDrivers,
+            driversFromUsersByFleetId,
+            driversFromUsersByLegacyFleetId,
+            driversFromUsersByFleetName
+        ])
     }
 
     /// Creates or updates a manager-created driver profile in users collection.
@@ -483,6 +505,18 @@ class FirestoreService {
     ) async throws {
         var payload = data
         payload["role"] = "driver"
+
+        let fleetIdValue = (payload["fleetId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let fleetNameValue = (payload["fleetName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if fleetIdValue.isEmpty, !fleetNameValue.isEmpty {
+            payload["fleetId"] = fleetNameValue
+        }
+
+        if fleetNameValue.isEmpty, !fleetIdValue.isEmpty {
+            payload["fleetName"] = fleetIdValue
+        }
+
         payload["updatedAt"] = Timestamp(date: Date())
 
         if payload["createdAt"] == nil {
@@ -664,6 +698,97 @@ class FirestoreService {
         }
         .sorted { lhs, rhs in
             lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    /// Maps users collection docs into fleet-driver models.
+    private func mapUserDocsToFleetDrivers(_ docs: [QueryDocumentSnapshot], fleetId: String) -> [FleetDriverUser] {
+        docs.compactMap { doc in
+            let data = doc.data()
+            let rawRole = (data["role"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !rawRole.isEmpty && rawRole != "driver" {
+                return nil
+            }
+            let role = rawRole.isEmpty ? "driver" : rawRole
+
+            let resolvedFleetId = (data["fleetId"] as? String)
+                ?? (data["fleetID"] as? String)
+                ?? (data["fleetName"] as? String)
+                ?? fleetId
+
+            return FleetDriverUser(
+                userId: doc.documentID,
+                name: data["name"] as? String ?? "",
+                email: data["email"] as? String ?? "",
+                phone: data["phone"] as? String ?? "",
+                fleetId: resolvedFleetId,
+                role: role,
+                assignedVehicleId: data["assignedVehicleId"] as? String ?? ""
+            )
+        }
+    }
+
+    /// Merges driver lists from multiple Firestore sources by user id.
+    private func mergeFleetDriverLists(_ lists: [[FleetDriverUser]]) -> [FleetDriverUser] {
+        var mergedByUserId: [String: FleetDriverUser] = [:]
+
+        for list in lists {
+            for driver in list {
+                if let existing = mergedByUserId[driver.userId] {
+                    mergedByUserId[driver.userId] = mergeDriver(existing, with: driver)
+                } else {
+                    mergedByUserId[driver.userId] = driver
+                }
+            }
+        }
+
+        return mergedByUserId.values.sorted { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    /// Keeps the primary model and fills only missing fields from secondary.
+    private func mergeDriver(_ primary: FleetDriverUser, with secondary: FleetDriverUser) -> FleetDriverUser {
+        FleetDriverUser(
+            userId: primary.userId,
+            name: primary.name.isEmpty ? secondary.name : primary.name,
+            email: primary.email.isEmpty ? secondary.email : primary.email,
+            phone: primary.phone.isEmpty ? secondary.phone : primary.phone,
+            fleetId: primary.fleetId.isEmpty ? secondary.fleetId : primary.fleetId,
+            role: primary.role.isEmpty ? secondary.role : primary.role,
+            assignedVehicleId: primary.assignedVehicleId.isEmpty ? secondary.assignedVehicleId : primary.assignedVehicleId
+        )
+    }
+
+    /// Fetches query documents from Firestore for async/await consumers.
+    private func fetchDocuments(for query: Query) async throws -> [QueryDocumentSnapshot] {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[QueryDocumentSnapshot], Error>) in
+            query.getDocuments { snapshot, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                continuation.resume(returning: snapshot?.documents ?? [])
+            }
+        }
+    }
+
+    /// Fetches users docs when rules permit; disables future users queries after permission denial.
+    private func fetchUserDriverDocsIfAllowed(for query: Query) async -> [QueryDocumentSnapshot] {
+        guard canQueryUsersCollectionForDrivers else {
+            return []
+        }
+
+        do {
+            return try await fetchDocuments(for: query)
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == FirestoreErrorDomain,
+               nsError.code == FirestoreErrorCode.permissionDenied.rawValue {
+                canQueryUsersCollectionForDrivers = false
+            }
+            return []
         }
     }
 

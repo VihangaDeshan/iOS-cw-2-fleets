@@ -230,6 +230,7 @@ final class AuthViewModel: ObservableObject {
         let document = try await firestoreProvider().collection("users").document(uid).getDocument()
         let value = (document.data()?["fleetId"] as? String)
             ?? (document.data()?["fleetID"] as? String)
+            ?? (document.data()?["fleetName"] as? String)
             ?? ""
         return value
     }

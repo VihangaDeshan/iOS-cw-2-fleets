@@ -115,6 +115,7 @@ struct AddDriverView: View {
                 "email": normalizedEmail,
                 "phone": normalizedPhone,
                 "fleetId": authViewModel.fleetId,
+                "fleetName": authViewModel.fleetId,
                 "assignedVehicleId": selectedVehicleId?.uuidString ?? "",
                 "createdByManager": true
             ]
