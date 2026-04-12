@@ -13,6 +13,7 @@ struct VehicleCardView: View {
     // MARK: - Stored Properties
     let vehicle: VehicleEntity
     @EnvironmentObject var fleetViewModel: FleetViewModel
+    @EnvironmentObject var authViewModel: AuthViewModel
 
     // MARK: - Computed Properties
     var status: String {
@@ -70,23 +71,25 @@ struct VehicleCardView: View {
         VStack(spacing: 0) {
             HStack {
                 Text(vehicle.registration ?? "Unknown")
-                    .font(.system(size: 15, weight: .bold))
-                    .tracking(0.5)
-
-                VehicleStatusChip(status: status)
+                    .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    .tracking(1.0)
+                    .foregroundColor(.primary)
 
                 Spacer()
+
+                VehicleStatusChip(status: status)
+            }
+
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(vehicle.make ?? "") \(vehicle.model ?? "") · \(vehicle.year)")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
 
                 Text(daysText)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(daysColour)
             }
-
-            Text("\(vehicle.make ?? "") \(vehicle.model ?? "") · \(vehicle.year)")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 3)
+            .padding(.top, 3)
 
             HStack {
                 Circle()
@@ -105,7 +108,9 @@ struct VehicleCardView: View {
                 Spacer()
 
                 NavigationLink {
-                    Text("Vehicle Detail - Part 4")
+                    VehicleDetailView(vehicle: vehicle)
+                        .environmentObject(authViewModel)
+                        .environmentObject(fleetViewModel)
                 } label: {
                     Text("Details ›")
                         .font(.system(size: 10, weight: .semibold))
@@ -169,6 +174,7 @@ struct VehicleCardView: View {
 
     return NavigationStack {
         VehicleCardView(vehicle: sample)
+            .environmentObject(AuthViewModel())
             .environmentObject(FleetViewModel())
             .padding()
             .background(Color.systemGroupedBg)
