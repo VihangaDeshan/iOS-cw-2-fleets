@@ -15,6 +15,8 @@ struct ManagerHomeView: View {
 
     @State private var showAddVehicle = false
     @State private var showAddDriver = false
+    @State private var showRecords = false
+    @State private var showFaults = false
 
     // MARK: - Greeting
     var greeting: String {
@@ -86,6 +88,17 @@ struct ManagerHomeView: View {
                 AddVehicleView()
                     .environmentObject(fleetViewModel)
                     .environmentObject(authViewModel)
+            }
+            .sheet(isPresented: $showAddDriver) {
+                AddDriverView()
+                    .environmentObject(fleetViewModel)
+            }
+            .sheet(isPresented: $showRecords) {
+                RecordsTabView()
+                    .environmentObject(fleetViewModel)
+            }
+            .sheet(isPresented: $showFaults) {
+                FaultsTabView()
             }
         }
     }
@@ -351,7 +364,7 @@ struct ManagerHomeView: View {
                     title: "Log Service",
                     subtitle: "Add or scan invoice"
                 ) {
-                    // Part 4
+                    showRecords = true
                 }
 
                 quickActionCell(
@@ -360,7 +373,7 @@ struct ManagerHomeView: View {
                     title: "View Faults",
                     subtitle: "0 open"
                 ) {
-                    // Part 7
+                    showFaults = true
                 }
             }
         }

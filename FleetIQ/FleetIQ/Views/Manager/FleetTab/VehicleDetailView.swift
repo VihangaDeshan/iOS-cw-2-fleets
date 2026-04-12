@@ -72,16 +72,18 @@ struct VehicleDetailView: View {
                 .environmentObject(authViewModel)
         }
         .sheet(isPresented: $showFuelLog) {
-            Text("Fuel Log - Part 8")
-                .padding()
+            NavigationStack {
+                FuelLogView(vehicle: viewModel.vehicle)
+            }
         }
         .sheet(isPresented: $showCostReport) {
-            Text("Cost Report - Part 9")
-                .padding()
+            NavigationStack {
+                CostReportView(vehicle: viewModel.vehicle)
+            }
         }
         .sheet(isPresented: $showDocumentVault) {
-            Text("Document Vault - Part 10")
-                .padding()
+            DocumentVaultView(vehicle: viewModel.vehicle)
+                .environmentObject(authViewModel)
         }
     }
 

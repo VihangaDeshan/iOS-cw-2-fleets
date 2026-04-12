@@ -28,20 +28,20 @@ struct ManagerTabView: View {
                     Label("Fleet", systemImage: "truck.box.fill")
                 }
 
-            // Tab 3 - Faults (placeholder for now)
-            Text("Faults - coming in Part 7")
+            // Tab 3 - Faults
+            FaultsTabView()
                 .tabItem {
                     Label("Faults", systemImage: "exclamationmark.triangle.fill")
                 }
 
-            // Tab 4 - Records (placeholder for now)
-            Text("Records - coming in Part 8")
+            // Tab 4 - Records
+            RecordsTabView()
                 .tabItem {
                     Label("Records", systemImage: "doc.text.fill")
                 }
 
-            // Tab 5 - Settings (placeholder for now)
-            Text("Settings - coming in Part 13")
+            // Tab 5 - Settings
+            ManagerSettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape.fill")
                 }
