@@ -29,7 +29,7 @@ struct ManagerTabView: View {
                 }
 
             // Tab 3 - Faults
-            FaultsTabView()
+            FaultListView()
                 .tabItem {
                     Label("Faults", systemImage: "exclamationmark.triangle.fill")
                 }

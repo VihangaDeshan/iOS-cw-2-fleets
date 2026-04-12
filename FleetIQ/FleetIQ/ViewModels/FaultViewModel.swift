@@ -2,7 +2,7 @@
 //  FaultViewModel.swift
 //  FleetIQ
 //
-//  Created by GitHub Copilot on 2026-04-12.
+//  Created by Vihanga Deshan Sammandapperuma on 2026-04-12.
 //
 
 import Foundation
@@ -26,6 +26,7 @@ final class FaultViewModel: ObservableObject {
     private let context = PersistenceController.shared.viewContext
     private let firestoreService = FirestoreService.shared
     private let locationService = LocationService()
+    private var resolvingPhotoURLFaultIDs: Set<String> = []
 
     private var managerFaultListener: ListenerRegistration?
     private var myFaultListener: ListenerRegistration?
@@ -47,7 +48,7 @@ final class FaultViewModel: ObservableObject {
         urgency: String,
         photos: [UIImage],
         fleetId: String
-    ) async throws {
+    ) async throws -> UUID {
         let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedDriverId = driverId.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -162,19 +163,27 @@ final class FaultViewModel: ObservableObject {
 
         myFaults.insert(localFault, at: 0)
         recalculateOpenFaultCount()
+        return faultUUID
     }
 
     /// Starts manager listener for all fleet faults.
     func startFaultListener(fleetId: String) {
         managerFaultListener?.remove()
 
-        managerFaultListener = firestoreService.listenToFaultReports(fleetId: fleetId) { [weak self] docs in
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            faultReports = []
+            recalculateOpenFaultCount()
+            return
+        }
+
+        managerFaultListener = firestoreService.listenToFaultReports(fleetId: normalizedFleetId) { [weak self] docs in
             guard let self else {
                 return
             }
 
             Task { @MainActor in
-                self.syncFaultDocsIntoState(docs, target: .manager)
+                self.syncFaultDocsIntoState(docs, fleetId: normalizedFleetId, target: .manager)
             }
         }
     }
@@ -183,13 +192,21 @@ final class FaultViewModel: ObservableObject {
     func startMyFaultListener(fleetId: String, driverId: String) {
         myFaultListener?.remove()
 
-        myFaultListener = firestoreService.listenToMyFaults(fleetId: fleetId, driverId: driverId) { [weak self] docs in
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDriverId = driverId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty, !normalizedDriverId.isEmpty else {
+            myFaults = []
+            recalculateOpenFaultCount()
+            return
+        }
+
+        myFaultListener = firestoreService.listenToMyFaults(fleetId: normalizedFleetId, driverId: normalizedDriverId) { [weak self] docs in
             guard let self else {
                 return
             }
 
             Task { @MainActor in
-                self.syncFaultDocsIntoState(docs, target: .driver)
+                self.syncFaultDocsIntoState(docs, fleetId: normalizedFleetId, target: .driver)
             }
         }
     }
@@ -231,8 +248,12 @@ final class FaultViewModel: ObservableObject {
         case driver
     }
 
-    private func syncFaultDocsIntoState(_ docs: [QueryDocumentSnapshot], target: FaultSyncTarget) {
-        let entities = docs.map { upsertFaultEntity(from: $0) }
+    private func syncFaultDocsIntoState(
+        _ docs: [QueryDocumentSnapshot],
+        fleetId: String,
+        target: FaultSyncTarget
+    ) {
+        let entities = docs.map { upsertFaultEntity(from: $0, fleetId: fleetId) }
 
         try? context.save()
 
@@ -250,7 +271,7 @@ final class FaultViewModel: ObservableObject {
         recalculateOpenFaultCount()
     }
 
-    private func upsertFaultEntity(from doc: QueryDocumentSnapshot) -> FaultReportEntity {
+    private func upsertFaultEntity(from doc: QueryDocumentSnapshot, fleetId: String?) -> FaultReportEntity {
         let data = doc.data()
 
         let rawId = (data["id"] as? String) ?? doc.documentID
@@ -265,13 +286,26 @@ final class FaultViewModel: ObservableObject {
             ?? ""
         entity.urgency = (data["urgency"] as? String ?? "medium")
         entity.status = (data["status"] as? String ?? "open")
-        entity.photoURL = preferredPhotoReference(from: data)
+        let photoReference = preferredPhotoReference(from: data)
+        entity.photoURL = photoReference
         entity.latitude = numericValue(from: data["latitude"])
         entity.longitude = numericValue(from: data["longitude"])
         entity.createdAt = parseDateValue(data["createdAt"]) ?? Date()
 
         if let vehicleUUID = parseUUID(from: data["vehicleId"]) {
             entity.vehicleId = vehicleUUID
+        }
+
+        if let photoReference,
+           photoReference.hasPrefix("storage_path:"),
+           let fleetId,
+           !fleetId.isEmpty {
+            resolvePendingPhotoURLIfNeeded(
+                photoReference,
+                faultId: faultUUID.uuidString,
+                fleetId: fleetId,
+                entity: entity
+            )
         }
 
         return entity
@@ -343,6 +377,50 @@ final class FaultViewModel: ObservableObject {
         }
 
         return nil
+    }
+
+    private func resolvePendingPhotoURLIfNeeded(
+        _ reference: String,
+        faultId: String,
+        fleetId: String,
+        entity: FaultReportEntity
+    ) {
+        guard !resolvingPhotoURLFaultIDs.contains(faultId) else {
+            return
+        }
+
+        resolvingPhotoURLFaultIDs.insert(faultId)
+
+        Task {
+            defer {
+                resolvingPhotoURLFaultIDs.remove(faultId)
+            }
+
+            do {
+                guard let resolvedURL = try await firestoreService.resolveStoragePathReference(reference),
+                      !resolvedURL.isEmpty,
+                      entity.managedObjectContext != nil else {
+                    return
+                }
+
+                entity.photoURL = resolvedURL
+                try context.save()
+
+                try await firestoreService.updateFaultReport(
+                    fleetId: fleetId,
+                    faultId: faultId,
+                    data: [
+                        "photoURL": resolvedURL,
+                        "updatedAt": Timestamp(date: Date())
+                    ]
+                )
+            } catch {
+                #if DEBUG
+                let nsError = error as NSError
+                print("[FaultViewModel] Deferred photo URL resolution failed for \(faultId): \(nsError.domain) (\(nsError.code)) - \(nsError.localizedDescription)")
+                #endif
+            }
+        }
     }
 
     private func recalculateOpenFaultCount() {

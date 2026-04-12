@@ -2,7 +2,7 @@
 //  ManageDriversView.swift
 //  FleetIQ
 //
-//  Created by GitHub Copilot on 2026-04-12.
+//  Created by Vihanga Deshan Sammandapperuma on 2026-04-12.
 //
 
 import SwiftUI

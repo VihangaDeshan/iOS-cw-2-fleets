@@ -2,7 +2,7 @@
 //  ReportFaultView.swift
 //  FleetIQ
 //
-//  Created by GitHub Copilot on 2026-04-12.
+//  Created by Vihanga Deshan Sammandapperuma on 2026-04-12.
 //
 
 import SwiftUI
@@ -26,8 +26,7 @@ struct ReportFaultView: View {
 
     @State private var errorMessage: String = ""
     @State private var showErrorAlert: Bool = false
-    @State private var showSuccessScreen: Bool = false
-    @State private var submittedAt: Date?
+    @State private var submittedFaultPayload: SubmittedFaultPayload?
     @State private var showPartialSuccessAlert: Bool = false
 
     private var normalizedFleetId: String {
@@ -88,8 +87,14 @@ struct ReportFaultView: View {
                     }
                 }
             }
-            .navigationDestination(isPresented: $showSuccessScreen) {
-                FaultSubmittedConfirmationView(submittedAt: submittedAt ?? Date()) {
+            .navigationDestination(item: $submittedFaultPayload) { payload in
+                FaultConfirmationView(
+                    faultId: payload.id,
+                    submittedAt: payload.submittedAt,
+                    fleetId: payload.fleetId,
+                    driverId: payload.driverId,
+                    vehicleId: payload.vehicleId
+                ) {
                     resetForm()
                 }
             }
@@ -263,7 +268,7 @@ struct ReportFaultView: View {
         }
 
         do {
-            try await faultViewModel.submitFault(
+            let createdFaultId = try await faultViewModel.submitFault(
                 vehicleId: normalizedVehicleId,
                 driverId: normalizedDriverId,
                 description: descriptionText,
@@ -272,13 +277,18 @@ struct ReportFaultView: View {
                 fleetId: normalizedFleetId
             )
 
-            submittedAt = Date()
-            showSuccessScreen = true
+            submittedFaultPayload = SubmittedFaultPayload(
+                id: createdFaultId,
+                submittedAt: Date(),
+                fleetId: normalizedFleetId,
+                driverId: normalizedDriverId,
+                vehicleId: normalizedVehicleId
+            )
         } catch {
             if !selectedPhotos.isEmpty,
                shouldRetryWithoutPhoto(for: error) {
                 do {
-                    try await faultViewModel.submitFault(
+                    let createdFaultId = try await faultViewModel.submitFault(
                         vehicleId: normalizedVehicleId,
                         driverId: normalizedDriverId,
                         description: descriptionText,
@@ -287,8 +297,13 @@ struct ReportFaultView: View {
                         fleetId: normalizedFleetId
                     )
 
-                    submittedAt = Date()
-                    showSuccessScreen = true
+                    submittedFaultPayload = SubmittedFaultPayload(
+                        id: createdFaultId,
+                        submittedAt: Date(),
+                        fleetId: normalizedFleetId,
+                        driverId: normalizedDriverId,
+                        vehicleId: normalizedVehicleId
+                    )
                     showPartialSuccessAlert = true
                     return
                 } catch {
@@ -320,6 +335,14 @@ struct ReportFaultView: View {
         photo2 = nil
         photo3 = nil
     }
+}
+
+private struct SubmittedFaultPayload: Identifiable, Hashable {
+    let id: UUID
+    let submittedAt: Date
+    let fleetId: String
+    let driverId: String
+    let vehicleId: String
 }
 
 // MARK: - Photo Slot
@@ -379,56 +402,6 @@ private struct PhotoSlotView: View {
         }
 
         image = uiImage
-    }
-}
-
-// MARK: - Success Screen
-private struct FaultSubmittedConfirmationView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let submittedAt: Date
-    let onDone: () -> Void
-
-    var body: some View {
-        VStack(spacing: 18) {
-            Spacer()
-
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 64))
-                .foregroundColor(.statusActive)
-
-            Text("Fault Report Sent")
-                .font(.title2.weight(.bold))
-
-            Text("Your manager has been notified. We captured your urgency, notes, and GPS location.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 18)
-
-            Text(submittedAt.formatted(date: .abbreviated, time: .shortened))
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            Button {
-                onDone()
-                dismiss()
-            } label: {
-                Text("Back to Report")
-                    .font(.headline.weight(.semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color.driverGreen)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-            .padding(.horizontal, 20)
-
-            Spacer()
-        }
-        .padding()
-        .navigationBarBackButtonHidden(true)
-        .background(Color.systemGroupedBg)
     }
 }
 

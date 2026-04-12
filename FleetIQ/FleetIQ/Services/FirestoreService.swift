@@ -279,6 +279,44 @@ class FirestoreService {
         )
     }
 
+    /// Resolves a stored photo reference into a direct download URL when available.
+    /// Supports both direct `http(s)` URLs and `storage_path:{path}` placeholders.
+    /// Returns nil when the placeholder object is not yet readable.
+    func resolveStoragePathReference(_ reference: String) async throws -> String? {
+        let trimmed = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
+            return trimmed
+        }
+
+        let prefix = "storage_path:"
+        guard trimmed.hasPrefix(prefix) else {
+            return nil
+        }
+
+        let rawPath = String(trimmed.dropFirst(prefix.count))
+        let normalizedPath = normalizedStoragePath(rawPath)
+        guard !normalizedPath.isEmpty else {
+            return nil
+        }
+
+        let ref = Storage.storage().reference().child(normalizedPath)
+
+        do {
+            let url = try await ref.downloadURL()
+            return url.absoluteString
+        } catch {
+            if isStorageObjectNotFound(error) {
+                return nil
+            }
+
+            throw error
+        }
+    }
+
     /// Builds the Firebase Storage path for a fault report photo.
     /// Path format: fleets/{fleetId}/faults/{faultId}/{filename}.jpg
     func faultPhotoPath(
