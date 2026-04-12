@@ -15,6 +15,7 @@ struct AddVehicleView: View {
         case registration
         case insurance
         case licence
+        case emission
     }
 
     // MARK: - Environment
@@ -34,8 +35,10 @@ struct AddVehicleView: View {
     @State private var currentMileage = ""
     @State private var insuranceExpiry = Date()
     @State private var licenceExpiry = Date()
+    @State private var emissionExpiry = Date()
     @State private var hasInsuranceDate = false
     @State private var hasLicenceDate = false
+    @State private var hasEmissionDate = false
     @State private var isSaving = false
 
     // MARK: - Validation State
@@ -43,20 +46,31 @@ struct AddVehicleView: View {
     @State private var makeError = ""
     @State private var modelError = ""
     @State private var mileageError = ""
+    @State private var emissionError = ""
 
     // MARK: - OCR State
     @State private var registrationItem: PhotosPickerItem?
     @State private var insuranceItem: PhotosPickerItem?
     @State private var licenceItem: PhotosPickerItem?
+    @State private var emissionItem: PhotosPickerItem?
     @State private var isScanning = false
     @State private var scanMessage = ""
     @State private var registrationVerified = false
     @State private var insuranceVerified = false
     @State private var licenceVerified = false
+    @State private var emissionVerified = false
 
     // MARK: - Constants
     let fuelTypes = ["Diesel", "Petrol", "Hybrid", "Electric", "CNG"]
     let years = Array(2000...2026).reversed()
+
+    // MARK: - Computed
+
+    /// Returns true when selected fuel type requires an emission test.
+    private var requiresEmissionTest: Bool {
+        let normalized = fuelType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized != "hybrid" && normalized != "electric"
+    }
 
     // MARK: - Body
     var body: some View {
@@ -102,6 +116,19 @@ struct AddVehicleView: View {
                         ) {
                             PhotosPicker(selection: $insuranceItem, matching: .images) {
                                 stepActionLabel(insuranceVerified ? "Rescan" : "Scan")
+                            }
+                        }
+
+                        if requiresEmissionTest {
+                            verifiedStepRow(
+                                title: "Emission Test",
+                                subtitle: emissionVerified ? emissionExpiryText() : "Pending scan",
+                                isVerified: emissionVerified,
+                                tint: .statusDueSoon
+                            ) {
+                                PhotosPicker(selection: $emissionItem, matching: .images) {
+                                    stepActionLabel(emissionVerified ? "Rescan" : "Scan")
+                                }
                             }
                         }
 
@@ -201,6 +228,24 @@ struct AddVehicleView: View {
                             displayedComponents: .date
                         )
                     }
+
+                    if requiresEmissionTest {
+                        Toggle("Emission Test", isOn: $hasEmissionDate)
+
+                        if hasEmissionDate {
+                            DatePicker(
+                                "Emission Expiry",
+                                selection: $emissionExpiry,
+                                displayedComponents: .date
+                            )
+                        }
+
+                        if !emissionError.isEmpty {
+                            Text(emissionError)
+                                .font(.caption)
+                                .foregroundColor(.statusOverdue)
+                        }
+                    }
                 }
             }
             .navigationTitle("Add Vehicle Details")
@@ -235,6 +280,18 @@ struct AddVehicleView: View {
             .onChange(of: licenceItem) { _, item in
                 Task {
                     await process(item: item, as: .licence)
+                }
+            }
+            .onChange(of: emissionItem) { _, item in
+                Task {
+                    await process(item: item, as: .emission)
+                }
+            }
+            .onChange(of: fuelType) { _, _ in
+                if !requiresEmissionTest {
+                    hasEmissionDate = false
+                    emissionVerified = false
+                    emissionError = ""
                 }
             }
             .disabled(isSaving)
@@ -294,6 +351,8 @@ struct AddVehicleView: View {
             return .insurance
         case .licence:
             return .licence
+        case .emission:
+            return .emission
         }
     }
 
@@ -330,6 +389,12 @@ struct AddVehicleView: View {
                 hasLicenceDate = true
                 licenceVerified = true
             }
+        case .emission:
+            if let expiry = result.emissionExpiry {
+                emissionExpiry = expiry
+                hasEmissionDate = true
+                emissionVerified = true
+            }
         }
     }
 
@@ -343,6 +408,12 @@ struct AddVehicleView: View {
     /// - Returns: User-friendly licence expiry string.
     private func licenceExpiryText() -> String {
         "Expires: \(dateString(from: licenceExpiry))"
+    }
+
+    /// Returns formatted emission expiry subtitle text.
+    /// - Returns: User-friendly emission expiry string.
+    private func emissionExpiryText() -> String {
+        "Expires: \(dateString(from: emissionExpiry))"
     }
 
     /// Formats a date using medium style.
@@ -363,6 +434,7 @@ struct AddVehicleView: View {
         makeError = ""
         modelError = ""
         mileageError = ""
+        emissionError = ""
 
         let normalizedRegistration = registration.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedMake = make.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -385,10 +457,15 @@ struct AddVehicleView: View {
             mileageError = "Enter a valid mileage value."
         }
 
+        if requiresEmissionTest && !hasEmissionDate {
+            emissionError = "Emission test expiry is required for non-hybrid/electric vehicles."
+        }
+
         return registrationError.isEmpty &&
             makeError.isEmpty &&
             modelError.isEmpty &&
-            mileageError.isEmpty
+            mileageError.isEmpty &&
+            emissionError.isEmpty
     }
 
     // MARK: - Save Action

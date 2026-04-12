@@ -75,19 +75,26 @@ struct FleetTabView: View {
                     }
 
                     if fleetViewModel.isLoading {
-                        ProgressView()
-                            .padding(.top, 40)
-                    } else if filteredVehicles.isEmpty {
+                        VStack {
+                            Spacer(minLength: 0)
+                            ProgressView()
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 260)
+                    } else if fleetViewModel.vehicles.isEmpty {
                         ContentUnavailableView(
                             "No Vehicles",
                             systemImage: "truck.box",
-                            description: Text(
-                                searchText.isEmpty
-                                ? "Add your first vehicle below"
-                                : "No vehicles match your search"
-                            )
+                            description: Text("Tap + to add your first vehicle")
                         )
-                        .padding(.top, 40)
+                        .frame(maxWidth: .infinity, minHeight: 260)
+                    } else if filteredVehicles.isEmpty {
+                        ContentUnavailableView(
+                            "No Results",
+                            systemImage: "magnifyingglass",
+                            description: Text("Try a different search or filter")
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 260)
                     } else {
                         LazyVStack(spacing: 8) {
                             ForEach(filteredVehicles, id: \.id) { vehicle in

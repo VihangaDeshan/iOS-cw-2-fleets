@@ -32,7 +32,8 @@ struct ManagerHomeView: View {
 
     var todayDateString: String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "d MMMM yyyy"
+        formatter.locale = Locale(identifier: "en_GB")
+        formatter.dateStyle = .long
         return formatter.string(from: Date())
     }
 
@@ -93,7 +94,7 @@ struct ManagerHomeView: View {
     var fleetHeroCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text("FLEET STATUS")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.white.opacity(0.55))
@@ -102,19 +103,13 @@ struct ManagerHomeView: View {
                     Text("\(fleetViewModel.vehicles.count) Vehicles")
                         .font(.system(size: 22, weight: .bold))
                         .foregroundColor(.white)
+
+                    Text(todayDateString)
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.65))
                 }
 
                 Spacer()
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Today")
-                        .font(.system(size: 10))
-                        .foregroundColor(.white.opacity(0.55))
-
-                    Text(todayDateString)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white)
-                }
             }
 
             statusProgressBar

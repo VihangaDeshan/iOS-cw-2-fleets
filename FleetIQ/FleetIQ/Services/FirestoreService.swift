@@ -122,6 +122,80 @@ class FirestoreService {
         }
     }
 
+    // MARK: - Service Records
+
+    /// Saves a service record document to fleets/{fleetId}/serviceRecords/{recordId}.
+    /// - Parameters:
+    ///   - data: Service record payload.
+    ///   - fleetId: Fleet document identifier.
+    ///   - recordId: Service record document identifier.
+    func saveServiceRecord(
+        _ data: [String: Any],
+        fleetId: String,
+        recordId: String
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("serviceRecords")
+                .document(recordId)
+                .setData(data) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Deletes a service record from Firestore.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - recordId: Service record document identifier.
+    func deleteServiceRecord(
+        fleetId: String,
+        recordId: String
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("serviceRecords")
+                .document(recordId)
+                .delete { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Fetches all service records for a fleet once, sorted by newest first.
+    /// - Parameter fleetId: Fleet document identifier.
+    /// - Returns: Firestore query documents for service records.
+    func fetchServiceRecords(
+        fleetId: String
+    ) async throws -> [QueryDocumentSnapshot] {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[QueryDocumentSnapshot], Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("serviceRecords")
+                .order(by: "date", descending: true)
+                .getDocuments { snapshot, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: snapshot?.documents ?? [])
+                }
+        }
+    }
+
     // MARK: - Private Helpers
 
     /// Builds a strict Firestore payload for vehicle documents.
