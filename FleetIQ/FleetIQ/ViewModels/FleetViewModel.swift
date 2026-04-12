@@ -134,7 +134,6 @@ class FleetViewModel: ObservableObject {
 
         do {
             try context.save()
-            fetchFromCoreData()
 
             var payload: [String: Any] = [
                 "id": newId.uuidString,
@@ -149,16 +148,22 @@ class FleetViewModel: ObservableObject {
 
             if let insuranceExpiry {
                 payload["insuranceExpiry"] = Timestamp(date: insuranceExpiry)
+            } else {
+                payload["insuranceExpiry"] = NSNull()
             }
 
             if let licenceExpiry {
                 payload["licenceExpiry"] = Timestamp(date: licenceExpiry)
+            } else {
+                payload["licenceExpiry"] = NSNull()
             }
 
             try await firestoreService.saveVehicle(payload, fleetId: fleetId, vehicleId: newId.uuidString)
         } catch {
             errorMessage = error.localizedDescription
         }
+
+        fetchFromCoreData()
 
         isLoading = false
     }
@@ -287,6 +292,7 @@ class FleetViewModel: ObservableObject {
         listener = nil
     }
 
+    /// Ensures Firestore listener is removed when view model is deallocated.
     deinit {
         listener?.remove()
     }

@@ -16,8 +16,37 @@ import FirebaseCore
 import FirebaseFirestore
 #endif
 
+// MARK: - Firebase Bootstrap
+/// Configures Firebase and Firestore settings when SDKs are available.
+private func configureFirebaseIfAvailable() {
+#if canImport(Firebase)
+    if FirebaseApp.app() == nil {
+        FirebaseApp.configure()
+    }
+#elseif canImport(FirebaseCore)
+    if FirebaseApp.app() == nil {
+        FirebaseApp.configure()
+    }
+#endif
+
+#if canImport(FirebaseFirestore)
+    let settings = FirestoreSettings()
+    settings.cacheSettings = PersistentCacheSettings()
+    Firestore.firestore().settings = settings
+#endif
+}
+
 // MARK: - App Delegate
-final class AppDelegate: NSObject, UIApplicationDelegate {}
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    /// Handles launch-time setup for Firebase-backed services.
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        configureFirebaseIfAvailable()
+        return true
+    }
+}
 
 @main
 struct FleetIQApp: App {
@@ -36,7 +65,7 @@ struct FleetIQApp: App {
     // MARK: - Initializer
     /// Configures Firebase services during app launch.
     init() {
-        Self.configureFirebaseIfAvailable()
+        configureFirebaseIfAvailable()
         _authViewModel = StateObject(wrappedValue: AuthViewModel())
 
         if faceIDEnabled {
@@ -90,21 +119,6 @@ struct FleetIQApp: App {
     }
 
     // MARK: - Private Methods
-    /// Configures Firebase App and enables Firestore offline persistence when Firebase SDKs are available.
-    private static func configureFirebaseIfAvailable() {
-#if canImport(FirebaseCore)
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure()
-        }
-#endif
-
-#if canImport(FirebaseFirestore)
-        let settings = FirestoreSettings()
-        settings.cacheSettings = PersistentCacheSettings()
-        Firestore.firestore().settings = settings
-#endif
-    }
-
     /// Returns a valid role key for quick-login after Face Lock unlock.
     private var rememberedRoleForQuickLogin: String {
         let normalizedRole = lastSelectedRole.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
