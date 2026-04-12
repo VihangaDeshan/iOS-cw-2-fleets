@@ -14,6 +14,7 @@ enum VehicleOCRDocumentType {
     case registration
     case insurance
     case licence
+    case emission
 }
 
 // MARK: - Vehicle OCR Result
@@ -24,6 +25,7 @@ struct VehicleOCRResult {
     let year: Int16?
     let insuranceExpiry: Date?
     let licenceExpiry: Date?
+    let emissionExpiry: Date?
     let lineCount: Int
 }
 
@@ -84,17 +86,25 @@ final class VehicleOCRService {
 
         let insuranceExpiry: Date?
         let licenceExpiry: Date?
+        let emissionExpiry: Date?
 
         switch type {
         case .insurance:
             insuranceExpiry = expiryDateFromLines(normalizedLines, keywords: ["insurance", "policy", "valid until", "expires", "expiry"])
             licenceExpiry = nil
+            emissionExpiry = nil
         case .licence:
             insuranceExpiry = nil
             licenceExpiry = expiryDateFromLines(normalizedLines, keywords: ["licence", "license", "revenue", "valid until", "expires", "expiry"])
+            emissionExpiry = nil
+        case .emission:
+            insuranceExpiry = nil
+            licenceExpiry = nil
+            emissionExpiry = expiryDateFromLines(normalizedLines, keywords: ["emission", "emission test", "eco", "smoke", "valid until", "expires", "expiry"])
         case .registration:
             insuranceExpiry = nil
             licenceExpiry = nil
+            emissionExpiry = nil
         }
 
         return VehicleOCRResult(
@@ -104,6 +114,7 @@ final class VehicleOCRService {
             year: detectedYear,
             insuranceExpiry: insuranceExpiry,
             licenceExpiry: licenceExpiry,
+            emissionExpiry: emissionExpiry,
             lineCount: lines.count
         )
     }
@@ -145,18 +156,98 @@ final class VehicleOCRService {
             "Mazda", "Hyundai", "Kia", "Isuzu", "Tata", "Mahindra"
         ]
 
+        var extractedMake: String?
+        var extractedModel: String?
+
         for line in lines {
+            if extractedMake == nil, let labeledMake = valueAfterLabel(in: line, labels: ["make", "manufacturer", "brand"]) {
+                let parsed = parseMakeAndModel(from: labeledMake, knownMakes: knownMakes)
+                extractedMake = parsed.make ?? labeledMake
+                if extractedModel == nil {
+                    extractedModel = parsed.model
+                }
+            }
+
+            if extractedModel == nil, let labeledModel = valueAfterLabel(in: line, labels: ["model", "model no", "model number", "vehicle model"]) {
+                extractedModel = labeledModel
+            }
+
+            if let makeAndModel = valueAfterLabel(in: line, labels: ["make & model", "make and model", "make/model"]) {
+                let parsed = parseMakeAndModel(from: makeAndModel, knownMakes: knownMakes)
+                if extractedMake == nil {
+                    extractedMake = parsed.make
+                }
+                if extractedModel == nil {
+                    extractedModel = parsed.model
+                }
+            }
+
             for make in knownMakes {
                 if line.localizedCaseInsensitiveContains(make) {
                     let trimmed = line.trimmingCharacters(in: .whitespaces)
                     let makeRange = trimmed.range(of: make, options: .caseInsensitive)
                     let modelPart = makeRange.map { String(trimmed[$0.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
-                    return (make: make, model: modelPart.isEmpty ? nil : modelPart)
+
+                    if extractedMake == nil {
+                        extractedMake = make
+                    }
+
+                    if extractedModel == nil, !modelPart.isEmpty {
+                        extractedModel = modelPart
+                    }
                 }
             }
         }
 
-        return (make: nil, model: nil)
+        return (
+            make: extractedMake?.trimmingCharacters(in: .whitespacesAndNewlines),
+            model: extractedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    /// Extracts text value after a recognized label pattern.
+    /// - Parameters:
+    ///   - line: OCR text line.
+    ///   - labels: Candidate labels to match.
+    /// - Returns: Extracted value when a label is found.
+    private func valueAfterLabel(in line: String, labels: [String]) -> String? {
+        let lower = line.lowercased()
+
+        for label in labels {
+            if let range = lower.range(of: label) {
+                let suffix = line[range.upperBound...]
+                let cleaned = suffix
+                    .replacingOccurrences(of: ":", with: "")
+                    .replacingOccurrences(of: "-", with: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if !cleaned.isEmpty {
+                    return cleaned
+                }
+            }
+        }
+
+        return nil
+    }
+
+    /// Parses a combined make/model text into separate values.
+    /// - Parameters:
+    ///   - text: Combined make and model candidate.
+    ///   - knownMakes: Supported makes for detection.
+    /// - Returns: Parsed make and optional model.
+    private func parseMakeAndModel(from text: String, knownMakes: [String]) -> (make: String?, model: String?) {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for make in knownMakes {
+            guard let makeRange = cleaned.range(of: make, options: .caseInsensitive) else {
+                continue
+            }
+
+            let modelPart = cleaned[makeRange.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+            return (make: make, model: modelPart.isEmpty ? nil : String(modelPart))
+        }
+
+        return (make: nil, model: cleaned.isEmpty ? nil : cleaned)
     }
 
     /// Detects a likely vehicle year from OCR text.
