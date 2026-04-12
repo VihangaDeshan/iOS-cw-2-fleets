@@ -12,14 +12,25 @@ import FirebaseFirestore
 // MARK: - Auth Service
 final class AuthService {
     // MARK: - Properties
-    private let auth: Auth
-    private let firestore: Firestore
+    private let authProvider: () -> Auth
+    private let firestoreProvider: () -> Firestore
+
+    private var auth: Auth {
+        authProvider()
+    }
+
+    private var firestore: Firestore {
+        firestoreProvider()
+    }
 
     // MARK: - Initializer
     /// Creates an AuthService with Firebase Auth and Firestore dependencies.
-    init(auth: Auth = Auth.auth(), firestore: Firestore = Firestore.firestore()) {
-        self.auth = auth
-        self.firestore = firestore
+    init(
+        authProvider: @escaping () -> Auth = { Auth.auth() },
+        firestoreProvider: @escaping () -> Firestore = { Firestore.firestore() }
+    ) {
+        self.authProvider = authProvider
+        self.firestoreProvider = firestoreProvider
     }
 
     // MARK: - Public Methods
@@ -39,6 +50,8 @@ final class AuthService {
 
     /// Creates new account and saves role to Firestore users collection.
     func register(name: String, email: String, password: String, role: String, fleetId: String) async throws {
+        let normalizedRole = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
         let authResult = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
             auth.createUser(withEmail: email, password: password) { result, error in
                 if let error {
@@ -63,12 +76,12 @@ final class AuthService {
         var data: [String: Any] = [
             "name": name,
             "email": email,
-            "role": role,
+            "role": normalizedRole,
             "fleetId": fleetId,
             "createdAt": Timestamp(date: Date())
         ]
 
-        if role == "driver" {
+        if normalizedRole == "driver" {
             data["assignedVehicleId"] = ""
         }
 
@@ -134,6 +147,6 @@ final class AuthService {
             )
         }
 
-        return role
+        return role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
