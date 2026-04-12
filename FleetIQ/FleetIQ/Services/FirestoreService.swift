@@ -103,6 +103,34 @@ class FirestoreService {
             }
     }
 
+    /// Starts a real-time snapshot listener on a single vehicle document for a fleet.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - vehicleId: Vehicle document identifier.
+    ///   - onUpdate: Callback invoked with latest vehicle data.
+    /// - Returns: The active Firestore listener registration.
+    func listenToVehicle(
+        fleetId: String,
+        vehicleId: String,
+        onUpdate: @escaping ([String: Any]) -> Void
+    ) -> ListenerRegistration {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedVehicleId = vehicleId.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedFleetId.isEmpty, !normalizedVehicleId.isEmpty else {
+            onUpdate([:])
+            return NoOpListenerRegistration()
+        }
+
+        return db.collection("fleets")
+            .document(normalizedFleetId)
+            .collection("vehicles")
+            .document(normalizedVehicleId)
+            .addSnapshotListener { snapshot, _ in
+                onUpdate(snapshot?.data() ?? [:])
+            }
+    }
+
     /// Deletes a vehicle document from Firestore.
     /// - Parameters:
     ///   - fleetId: Fleet document identifier.

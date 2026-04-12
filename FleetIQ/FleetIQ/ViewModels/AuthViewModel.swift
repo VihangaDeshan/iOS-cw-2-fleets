@@ -35,7 +35,9 @@ final class AuthViewModel: ObservableObject {
     @Published var isAuthenticated: Bool = false
     @Published var userRole: String = ""
     @Published var currentUID: String = ""
+    @Published var currentUserName: String = ""
     @Published var fleetId: String = ""
+    @Published var assignedVehicleId: String = ""
     @Published var errorMessage: String = ""
 
     // MARK: - Private Properties
@@ -188,8 +190,20 @@ final class AuthViewModel: ObservableObject {
 
         for attempt in 1...maxAttempts {
             do {
-                let resolvedRole = try await authService.fetchUserRole(uid: uid)
-                let resolvedFleetId = try await fetchFleetId(uid: uid)
+                let userData = try await fetchUserDocument(uid: uid)
+
+                let resolvedRole = (userData["role"] as? String ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                let resolvedFleetId = ((userData["fleetId"] as? String)
+                    ?? (userData["fleetID"] as? String)
+                    ?? (userData["fleetName"] as? String)
+                    ?? "")
+                let resolvedName = (userData["name"] as? String ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let resolvedAssignedVehicleId = (userData["assignedVehicleId"] as? String ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
                 let normalizedRole = resolvedRole.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 let normalizedFleetId = resolvedFleetId.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -203,6 +217,8 @@ final class AuthViewModel: ObservableObject {
 
                 fleetId = normalizedFleetId
                 userRole = normalizedRole
+                currentUserName = resolvedName
+                assignedVehicleId = resolvedAssignedVehicleId
                 errorMessage = ""
                 return
             } catch {
@@ -225,6 +241,20 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
+    /// Fetches full user profile data from users/{uid}.
+    private func fetchUserDocument(uid: String) async throws -> [String: Any] {
+        let document = try await firestoreProvider().collection("users").document(uid).getDocument()
+        guard let data = document.data() else {
+            throw NSError(
+                domain: "AuthViewModel",
+                code: -12,
+                userInfo: [NSLocalizedDescriptionKey: "User profile not found."]
+            )
+        }
+
+        return data
+    }
+
     /// Fetches the fleetId field from users/{uid} in Firestore.
     private func fetchFleetId(uid: String) async throws -> String {
         let document = try await firestoreProvider().collection("users").document(uid).getDocument()
@@ -240,6 +270,8 @@ final class AuthViewModel: ObservableObject {
         isAuthenticated = false
         userRole = ""
         currentUID = ""
+        currentUserName = ""
         fleetId = ""
+        assignedVehicleId = ""
     }
 }

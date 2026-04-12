@@ -100,7 +100,7 @@ struct FleetIQApp: App {
                 } else if authViewModel.userRole == "manager" {
                     ManagerTabView()
                 } else {
-                    DriverDashboardPlaceholderView()
+                    DriverTabView()
                 }
             }
             .environmentObject(authViewModel)
