@@ -124,12 +124,16 @@ struct ManageDriversView: View {
                     .environmentObject(fleetViewModel)
                     .environmentObject(authViewModel)
             }
-            .sheet(isPresented: $showAddVehicle) {
+            .sheet(isPresented: $showAddVehicle, onDismiss: {
+                Task {
+                    await loadDrivers()
+                }
+            }) {
                 AddVehicleView()
                     .environmentObject(fleetViewModel)
                     .environmentObject(authViewModel)
             }
-            .task {
+            .task(id: authViewModel.fleetId) {
                 await loadDrivers()
             }
         }
@@ -212,11 +216,19 @@ struct ManageDriversView: View {
 
     @MainActor
     private func loadDrivers() async {
+        let normalizedFleetId = authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            drivers = []
+            errorText = "Fleet ID is not ready yet."
+            isLoading = false
+            return
+        }
+
         errorText = ""
         isLoading = true
 
         do {
-            drivers = try await firestoreService.fetchFleetDriverUsers(fleetId: authViewModel.fleetId)
+            drivers = try await firestoreService.fetchFleetDriverUsers(fleetId: normalizedFleetId)
         } catch {
             drivers = []
             errorText = "Could not load fleet drivers from database."

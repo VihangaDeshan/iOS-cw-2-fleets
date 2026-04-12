@@ -38,7 +38,6 @@ class FirestoreService {
         Self.ensureFirebaseConfigured()
         return Firestore.firestore()
     }()
-    private var canQueryUsersCollectionForDrivers = true
 
     // MARK: - Initializer
     /// Creates a Firestore service instance.
@@ -562,6 +561,41 @@ class FirestoreService {
         }
     }
 
+    /// Updates assignedVehicleId for a fleet-scoped driver profile document.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - driverId: Driver document identifier within fleets/{fleetId}/drivers.
+    ///   - vehicleId: Assigned vehicle identifier, empty to clear assignment.
+    func updateFleetDriverAssignment(
+        fleetId: String,
+        driverId: String,
+        vehicleId: String
+    ) async throws {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDriverId = driverId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty, !normalizedDriverId.isEmpty else {
+            return
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(normalizedFleetId)
+                .collection("drivers")
+                .document(normalizedDriverId)
+                .setData([
+                    "assignedVehicleId": vehicleId,
+                    "updatedAt": FieldValue.serverTimestamp()
+                ], merge: true) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
     // MARK: - Private Helpers
 
     /// Builds a strict Firestore payload for vehicle documents.
@@ -774,22 +808,9 @@ class FirestoreService {
         }
     }
 
-    /// Fetches users docs when rules permit; disables future users queries after permission denial.
+    /// Fetches users docs best-effort and returns an empty list when blocked by rules.
     private func fetchUserDriverDocsIfAllowed(for query: Query) async -> [QueryDocumentSnapshot] {
-        guard canQueryUsersCollectionForDrivers else {
-            return []
-        }
-
-        do {
-            return try await fetchDocuments(for: query)
-        } catch {
-            let nsError = error as NSError
-            if nsError.domain == FirestoreErrorDomain,
-               nsError.code == FirestoreErrorCode.permissionDenied.rawValue {
-                canQueryUsersCollectionForDrivers = false
-            }
-            return []
-        }
+        (try? await fetchDocuments(for: query)) ?? []
     }
 
     /// Converts optional date-like values into Firestore-compatible values.

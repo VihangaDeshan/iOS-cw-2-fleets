@@ -399,7 +399,7 @@ struct AddVehicleView: View {
                 }
             }
             .disabled(isSaving)
-            .task {
+            .task(id: authViewModel.fleetId) {
                 await loadDrivers()
             }
             .sheet(isPresented: $showManageDrivers, onDismiss: {
@@ -672,11 +672,26 @@ struct AddVehicleView: View {
     /// Loads fleet drivers from Firestore users collection where role is driver.
     @MainActor
     private func loadDrivers() async {
+        let normalizedFleetId = authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            drivers = []
+            selectedDriverUserId = ""
+            selectedDriverName = ""
+            driverLoadError = "Fleet ID is not ready yet. Please reopen this screen."
+            isLoadingDrivers = false
+            return
+        }
+
         driverLoadError = ""
         isLoadingDrivers = true
 
         do {
-            drivers = try await firestoreService.fetchFleetDriverUsers(fleetId: authViewModel.fleetId)
+            drivers = try await firestoreService.fetchFleetDriverUsers(fleetId: normalizedFleetId)
+            if !selectedDriverUserId.isEmpty,
+               !drivers.contains(where: { $0.userId == selectedDriverUserId }) {
+                selectedDriverUserId = ""
+                selectedDriverName = ""
+            }
         } catch {
             driverLoadError = "Could not fetch fleet drivers."
             drivers = []

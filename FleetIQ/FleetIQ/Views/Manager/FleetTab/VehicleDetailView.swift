@@ -20,6 +20,16 @@ struct VehicleDetailView: View {
     @State private var showFuelLog = false
     @State private var showCostReport = false
     @State private var showDocumentVault = false
+    @State private var showAssignDriver = false
+    @State private var drivers: [FleetDriverUser] = []
+    @State private var isLoadingDrivers = false
+    @State private var isSavingDriverAssignment = false
+    @State private var selectedDriverUserId = ""
+    @State private var selectedDriverName = ""
+    @State private var previousDriverUserId = ""
+    @State private var driverAssignmentError = ""
+
+    private let firestoreService = FirestoreService.shared
 
     // MARK: - Initializer
 
@@ -84,6 +94,9 @@ struct VehicleDetailView: View {
         .sheet(isPresented: $showDocumentVault) {
             DocumentVaultView(vehicle: viewModel.vehicle)
                 .environmentObject(authViewModel)
+        }
+        .sheet(isPresented: $showAssignDriver) {
+            assignDriverSheet
         }
     }
 
@@ -195,36 +208,140 @@ struct VehicleDetailView: View {
 
     /// Displays assigned driver summary row.
     private var driverRow: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(Color.navyPrimary)
-                .frame(width: 32, height: 32)
-                .overlay(
-                    Text(initials(viewModel.vehicle.assignedDriverId ?? "?"))
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.white)
-                )
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(viewModel.vehicle.assignedDriverId ?? "No driver assigned")
-                    .font(.subheadline.weight(.semibold))
-
-                Text("Assigned Driver")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+        Button {
+            showAssignDriver = true
+            Task {
+                await loadDriversForAssignment()
             }
+        } label: {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color.navyPrimary)
+                    .frame(width: 32, height: 32)
+                    .overlay(
+                        Text(initials(viewModel.vehicle.assignedDriverId ?? "?"))
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white)
+                    )
 
-            Spacer()
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(viewModel.vehicle.assignedDriverId ?? "No driver assigned")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.primary)
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12))
-                .foregroundColor(Color(.systemGray3))
+                    Text("Assigned Driver")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(.systemGray3))
+            }
+            .padding(13)
+            .background(Color.white)
+            .cornerRadius(12)
+            .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
         }
-        .padding(13)
-        .background(Color.white)
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+        .buttonStyle(.plain)
         .accessibilityLabel("Assigned driver: \(viewModel.vehicle.assignedDriverId ?? "none")")
+        .accessibilityHint("Double tap to change driver")
+    }
+
+    /// Displays driver picker sheet for assigning current vehicle.
+    private var assignDriverSheet: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if isLoadingDrivers {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("Loading drivers...")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    Button {
+                        selectedDriverUserId = ""
+                        selectedDriverName = ""
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("No driver")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("Clear assignment")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            if selectedDriverUserId.isEmpty {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.statusActive)
+                            }
+                        }
+                    }
+                    .disabled(isLoadingDrivers || isSavingDriverAssignment)
+
+                    ForEach(drivers, id: \.userId) { driver in
+                        Button {
+                            selectedDriverUserId = driver.userId
+                            selectedDriverName = driver.name
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(driver.name.isEmpty ? "Unnamed Driver" : driver.name)
+                                        .font(.subheadline.weight(.semibold))
+
+                                    Text(driver.email.isEmpty ? "No email" : driver.email)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+
+                                Spacer()
+
+                                if selectedDriverUserId == driver.userId {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.statusActive)
+                                }
+                            }
+                        }
+                        .disabled(isLoadingDrivers || isSavingDriverAssignment)
+                    }
+                }
+
+                if !driverAssignmentError.isEmpty {
+                    Section {
+                        Text(driverAssignmentError)
+                            .font(.subheadline)
+                            .foregroundColor(.statusOverdue)
+                    }
+                }
+            }
+            .navigationTitle("Assign Driver")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        showAssignDriver = false
+                    }
+                    .disabled(isSavingDriverAssignment)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        Task {
+                            await saveDriverAssignment()
+                        }
+                    }
+                    .fontWeight(.bold)
+                    .disabled(isLoadingDrivers || isSavingDriverAssignment)
+                }
+            }
+        }
     }
 
     // MARK: - Documents Card
@@ -427,5 +544,69 @@ struct VehicleDetailView: View {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         return formatter.string(from: date)
+    }
+
+    /// Loads drivers for assignment and preselects the currently assigned driver when possible.
+    private func loadDriversForAssignment() async {
+        isLoadingDrivers = true
+        driverAssignmentError = ""
+
+        do {
+            drivers = try await firestoreService.fetchFleetDriverUsers(fleetId: authViewModel.fleetId)
+            let currentAssignedName = (viewModel.vehicle.assignedDriverId ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let currentVehicleId = viewModel.vehicle.id?.uuidString ?? ""
+
+            if let assignedByVehicle = drivers.first(where: { $0.assignedVehicleId == currentVehicleId }) {
+                selectedDriverUserId = assignedByVehicle.userId
+                selectedDriverName = assignedByVehicle.name
+                previousDriverUserId = assignedByVehicle.userId
+                isLoadingDrivers = false
+                return
+            }
+
+            if let match = drivers.first(where: {
+                $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .localizedCaseInsensitiveCompare(currentAssignedName) == .orderedSame
+            }) {
+                selectedDriverUserId = match.userId
+                selectedDriverName = match.name
+                previousDriverUserId = match.userId
+            } else {
+                selectedDriverUserId = ""
+                selectedDriverName = ""
+                previousDriverUserId = ""
+            }
+        } catch {
+            drivers = []
+            selectedDriverUserId = ""
+            selectedDriverName = ""
+            previousDriverUserId = ""
+            driverAssignmentError = "Could not fetch drivers for this fleet."
+        }
+
+        isLoadingDrivers = false
+    }
+
+    /// Saves selected driver assignment for the current vehicle.
+    private func saveDriverAssignment() async {
+        isSavingDriverAssignment = true
+        driverAssignmentError = ""
+
+        let didAssign = await viewModel.assignDriver(
+            assignedDriverName: selectedDriverName.isEmpty ? nil : selectedDriverName,
+            assignedDriverUserId: selectedDriverUserId.isEmpty ? nil : selectedDriverUserId,
+            previousDriverUserId: previousDriverUserId.isEmpty ? nil : previousDriverUserId,
+            fleetId: authViewModel.fleetId
+        )
+
+        isSavingDriverAssignment = false
+
+        if didAssign {
+            showAssignDriver = false
+            return
+        }
+
+        driverAssignmentError = "Could not save assigned driver. Please try again."
     }
 }

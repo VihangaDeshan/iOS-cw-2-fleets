@@ -179,6 +179,11 @@ class FleetViewModel: ObservableObject {
                     userId: driverUserId,
                     vehicleId: newId.uuidString
                 )
+                try await firestoreService.updateFleetDriverAssignment(
+                    fleetId: fleetId,
+                    driverId: driverUserId,
+                    vehicleId: newId.uuidString
+                )
             }
         } catch {
             errorMessage = error.localizedDescription
