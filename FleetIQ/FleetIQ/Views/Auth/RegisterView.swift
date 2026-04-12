@@ -14,6 +14,7 @@ struct RegisterView: View {
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var authViewModel: AuthViewModel
+    @AppStorage("lastUsedEmail") private var lastUsedEmail: String = ""
 
     @State private var name: String = ""
     @State private var email: String = ""
@@ -164,6 +165,11 @@ struct RegisterView: View {
                 role: role,
                 fleetId: trimmedFleetId
             )
+
+            if authViewModel.isAuthenticated {
+                lastUsedEmail = trimmedEmail
+            }
+
             isSubmitting = false
         }
     }
@@ -195,6 +201,7 @@ struct RegisterView: View {
             .textInputAutocapitalization(isEmail ? .never : .words)
             .autocorrectionDisabled(isEmail)
             .keyboardType(isEmail ? .emailAddress : .default)
+            .textContentType(isEmail ? .username : .name)
             .foregroundStyle(.white)
             .padding(16)
             .background(Color.white.opacity(0.13))
@@ -212,9 +219,11 @@ struct RegisterView: View {
                 TextField("", text: text, prompt: Text(placeholder).foregroundStyle(.white.opacity(0.45)))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
+                    .textContentType(.newPassword)
                     .foregroundStyle(.white)
             } else {
                 SecureField("", text: text, prompt: Text(placeholder).foregroundStyle(.white.opacity(0.45)))
+                    .textContentType(.newPassword)
                     .foregroundStyle(.white)
             }
 

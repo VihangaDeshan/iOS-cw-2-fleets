@@ -16,6 +16,7 @@ struct LoginView: View {
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var authViewModel: AuthViewModel
+    @AppStorage("lastUsedEmail") private var lastUsedEmail: String = ""
 
     @State private var email: String = ""
     @State private var password: String = ""
@@ -71,6 +72,7 @@ struct LoginView: View {
                         TextField("", text: $email, prompt: Text("manager@fleetiq.lk").foregroundStyle(.white.opacity(0.5)))
                             .textInputAutocapitalization(.never)
                             .keyboardType(.emailAddress)
+                            .textContentType(.username)
                             .autocorrectionDisabled(true)
                             .foregroundStyle(.white)
                             .padding(16)
@@ -88,9 +90,11 @@ struct LoginView: View {
                                 TextField("", text: $password)
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled(true)
+                                    .textContentType(.password)
                                     .foregroundStyle(.white)
                             } else {
                                 SecureField("", text: $password)
+                                    .textContentType(.password)
                                     .foregroundStyle(.white)
                             }
 
@@ -217,6 +221,13 @@ struct LoginView: View {
         }
         .navigationBarBackButtonHidden(true)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            guard email.isEmpty else {
+                return
+            }
+
+            email = lastUsedEmail
+        }
     }
 
     // MARK: - Private Methods
@@ -231,6 +242,11 @@ struct LoginView: View {
 
         Task { @MainActor in
             await authViewModel.signIn(email: trimmedEmail, password: password, expectedRole: role)
+
+            if authViewModel.isAuthenticated {
+                lastUsedEmail = trimmedEmail
+            }
+
             isSubmitting = false
         }
     }
