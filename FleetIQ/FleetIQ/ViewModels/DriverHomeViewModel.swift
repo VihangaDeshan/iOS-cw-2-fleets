@@ -20,6 +20,7 @@ final class DriverHomeViewModel: ObservableObject {
     @Published var openFaults: Int = 0
     @Published var todayKmDriven: Double = 0
     @Published var isLoadingVehicle: Bool = false
+    @Published var todayActivityItems: [DriverActivityItem] = []
 
     // MARK: - Private Properties
     private let context = PersistenceController.shared.viewContext
@@ -196,7 +197,10 @@ final class DriverHomeViewModel: ObservableObject {
             )
         }
 
-        todayFuelLogs = ((try? context.fetch(fuelRequest)) ?? []).count
+        let fuelToday = (try? context.fetch(fuelRequest)) ?? []
+        todayFuelLogs = fuelToday.count
+
+        buildTodayActivityItems(trips: tripsToday, fuelLogs: fuelToday)
 
         let faultRequest = NSFetchRequest<FaultReportEntity>(entityName: "FaultReportEntity")
         if let vehicleUUID {
@@ -215,6 +219,33 @@ final class DriverHomeViewModel: ObservableObject {
         }
 
         openFaults = ((try? context.fetch(faultRequest)) ?? []).count
+    }
+
+    private func buildTodayActivityItems(trips: [TripLogEntity], fuelLogs: [FuelLogEntity]) {
+        let tripItems: [DriverActivityItem] = trips.map { trip in
+            DriverActivityItem(
+                kind: .trip,
+                title: trip.purpose?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    ? (trip.purpose ?? "Trip")
+                    : "Trip Logged",
+                subtitle: "\(String(format: "%.1f", trip.distanceKm)) km  •  \(trip.destination ?? "-")",
+                timestamp: trip.date ?? .distantPast
+            )
+        }
+
+        let fuelItems: [DriverActivityItem] = fuelLogs.map { fuel in
+            DriverActivityItem(
+                kind: .fuel,
+                title: "Fuel Logged",
+                subtitle: "\(String(format: "%.1f", fuel.litres)) L  •  LKR \(String(format: "%.0f", fuel.totalCostLKR))",
+                timestamp: fuel.date ?? .distantPast
+            )
+        }
+
+        todayActivityItems = (tripItems + fuelItems)
+            .sorted { $0.timestamp > $1.timestamp }
+            .prefix(6)
+            .map { $0 }
     }
 
     private func applyVehicleSnapshot(data: [String: Any], vehicleId: String) {
@@ -254,4 +285,17 @@ final class DriverHomeViewModel: ObservableObject {
 
         return nil
     }
+}
+
+struct DriverActivityItem: Identifiable {
+    enum ActivityKind {
+        case trip
+        case fuel
+    }
+
+    let id = UUID()
+    let kind: ActivityKind
+    let title: String
+    let subtitle: String
+    let timestamp: Date
 }

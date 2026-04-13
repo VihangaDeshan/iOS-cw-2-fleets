@@ -12,6 +12,7 @@ struct ManagerTabView: View {
     // MARK: - Stored Properties
     @EnvironmentObject var authViewModel: AuthViewModel
     @StateObject private var fleetViewModel = FleetViewModel()
+    @StateObject private var faultViewModel = FaultViewModel()
 
     // MARK: - Body
     var body: some View {
@@ -33,6 +34,7 @@ struct ManagerTabView: View {
                 .tabItem {
                     Label("Faults", systemImage: "exclamationmark.triangle.fill")
                 }
+                .badge(faultViewModel.openFaultCount > 0 ? faultViewModel.openFaultCount : 0)
 
             // Tab 4 - Records
             RecordsTabView()
@@ -50,9 +52,11 @@ struct ManagerTabView: View {
         .environmentObject(fleetViewModel)
         .onAppear {
             startVehicleSyncIfPossible()
+            startFaultSyncIfPossible()
         }
         .onChange(of: authViewModel.fleetId) { _, _ in
             startVehicleSyncIfPossible()
+            startFaultSyncIfPossible()
         }
         .onDisappear {
             fleetViewModel.stopListening()
@@ -71,6 +75,16 @@ struct ManagerTabView: View {
         }
 
         fleetViewModel.loadVehicles(fleetId: normalizedFleetId)
+    }
+
+    /// Starts fault listener only when a valid fleet id is available.
+    private func startFaultSyncIfPossible() {
+        let normalizedFleetId = authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            return
+        }
+
+        faultViewModel.startFaultListener(fleetId: normalizedFleetId)
     }
 }
 

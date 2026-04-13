@@ -435,6 +435,52 @@ class FirestoreService {
         }
     }
 
+    /// Fetches all fuel logs for a fleet once, sorted by newest first.
+    /// - Parameter fleetId: Fleet document identifier.
+    /// - Returns: Firestore query documents for fuel logs.
+    func fetchFuelLogs(
+        fleetId: String
+    ) async throws -> [QueryDocumentSnapshot] {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[QueryDocumentSnapshot], Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("fuelLogs")
+                .order(by: "date", descending: true)
+                .getDocuments { snapshot, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: snapshot?.documents ?? [])
+                }
+        }
+    }
+
+    /// Starts a real-time listener for all fuel logs in a fleet.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - onUpdate: Callback invoked with latest fuel-log documents.
+    /// - Returns: Active listener registration.
+    func listenToFuelLogs(
+        fleetId: String,
+        onUpdate: @escaping ([QueryDocumentSnapshot]) -> Void
+    ) -> ListenerRegistration {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            onUpdate([])
+            return NoOpListenerRegistration()
+        }
+
+        return db.collection("fleets")
+            .document(normalizedFleetId)
+            .collection("fuelLogs")
+            .order(by: "date", descending: true)
+            .addSnapshotListener { snapshot, _ in
+                onUpdate(snapshot?.documents ?? [])
+            }
+    }
+
     /// Deletes a fuel-log document from Firestore.
     /// - Parameters:
     ///   - fleetId: Fleet document identifier.
@@ -447,6 +493,106 @@ class FirestoreService {
             db.collection("fleets")
                 .document(fleetId)
                 .collection("fuelLogs")
+                .document(logId)
+                .delete { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
+    // MARK: - Trip Logs
+
+    /// Saves a trip-log document to fleets/{fleetId}/tripLogs/{logId}.
+    /// - Parameters:
+    ///   - data: Trip-log payload.
+    ///   - fleetId: Fleet document identifier.
+    ///   - logId: Trip-log identifier.
+    func saveTripLog(
+        _ data: [String: Any],
+        fleetId: String,
+        logId: String
+    ) async throws {
+        let payload = tripLogPayload(from: data, logId: logId)
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("tripLogs")
+                .document(logId)
+                .setData(payload) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Fetches all trip logs for a fleet once, sorted by newest first.
+    /// - Parameter fleetId: Fleet document identifier.
+    /// - Returns: Firestore query documents for trip logs.
+    func fetchTripLogs(
+        fleetId: String
+    ) async throws -> [QueryDocumentSnapshot] {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[QueryDocumentSnapshot], Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("tripLogs")
+                .order(by: "date", descending: true)
+                .getDocuments { snapshot, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: snapshot?.documents ?? [])
+                }
+        }
+    }
+
+    /// Starts a real-time listener for all trip logs in a fleet.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - onUpdate: Callback invoked with latest trip-log documents.
+    /// - Returns: Active listener registration.
+    func listenToTripLogs(
+        fleetId: String,
+        onUpdate: @escaping ([QueryDocumentSnapshot]) -> Void
+    ) -> ListenerRegistration {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            onUpdate([])
+            return NoOpListenerRegistration()
+        }
+
+        return db.collection("fleets")
+            .document(normalizedFleetId)
+            .collection("tripLogs")
+            .order(by: "date", descending: true)
+            .addSnapshotListener { snapshot, _ in
+                onUpdate(snapshot?.documents ?? [])
+            }
+    }
+
+    /// Deletes a trip-log document from Firestore.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - logId: Trip-log identifier.
+    func deleteTripLog(
+        fleetId: String,
+        logId: String
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("tripLogs")
                 .document(logId)
                 .delete { error in
                     if let error {
@@ -703,30 +849,8 @@ class FirestoreService {
                 .collection("drivers")
         )
 
-        let usersByFleetIdDocs = await fetchUserDriverDocsIfAllowed(
-            for: db.collection("users")
-                .whereField("fleetId", isEqualTo: normalizedFleetId)
-        )
-        let usersByLegacyFleetIdDocs = await fetchUserDriverDocsIfAllowed(
-            for: db.collection("users")
-                .whereField("fleetID", isEqualTo: normalizedFleetId)
-        )
-        let usersByFleetNameDocs = await fetchUserDriverDocsIfAllowed(
-            for: db.collection("users")
-                .whereField("fleetName", isEqualTo: normalizedFleetId)
-        )
-
         let fleetDrivers = mapFleetDriverDocsToFleetDrivers(fleetCollectionDocs, fleetId: normalizedFleetId)
-        let driversFromUsersByFleetId = mapUserDocsToFleetDrivers(usersByFleetIdDocs, fleetId: normalizedFleetId)
-        let driversFromUsersByLegacyFleetId = mapUserDocsToFleetDrivers(usersByLegacyFleetIdDocs, fleetId: normalizedFleetId)
-        let driversFromUsersByFleetName = mapUserDocsToFleetDrivers(usersByFleetNameDocs, fleetId: normalizedFleetId)
-
-        return mergeFleetDriverLists([
-            fleetDrivers,
-            driversFromUsersByFleetId,
-            driversFromUsersByLegacyFleetId,
-            driversFromUsersByFleetName
-        ])
+        return mergeFleetDriverLists([fleetDrivers])
     }
 
     /// Creates or updates a manager-created driver profile in users collection.
@@ -909,6 +1033,34 @@ class FirestoreService {
             "totalCostLKR": data["totalCostLKR"] as? Double ?? 0,
             "costPerLitre": data["costPerLitre"] as? Double ?? 0,
             "kmPerLitre": data["kmPerLitre"] as? Double ?? 0
+        ]
+    }
+
+    /// Builds a strict Firestore payload for trip-log documents.
+    /// - Parameters:
+    ///   - data: Incoming payload candidate.
+    ///   - logId: Trip-log identifier to persist as the `id` field.
+    /// - Returns: Dictionary matching trip-log schema.
+    private func tripLogPayload(from data: [String: Any], logId: String) -> [String: Any] {
+        let dateValue: Timestamp
+        if let timestamp = data["date"] as? Timestamp {
+            dateValue = timestamp
+        } else if let date = data["date"] as? Date {
+            dateValue = Timestamp(date: date)
+        } else {
+            dateValue = Timestamp(date: Date())
+        }
+
+        return [
+            "id": logId,
+            "vehicleId": data["vehicleId"] as? String ?? "",
+            "driverId": data["driverId"] as? String ?? "",
+            "purpose": data["purpose"] as? String ?? "",
+            "destination": data["destination"] as? String ?? "",
+            "startMileage": data["startMileage"] as? Double ?? 0,
+            "endMileage": data["endMileage"] as? Double ?? 0,
+            "distanceKm": data["distanceKm"] as? Double ?? 0,
+            "date": dateValue
         ]
     }
 

@@ -30,11 +30,7 @@ struct DriverTabView: View {
             DriverHomeView()
 
         case .fuel:
-            DriverTabPlaceholderView(
-                title: "Fuel",
-                subtitle: "Fuel logging features are coming next.",
-                icon: "fuelpump.fill"
-            )
+            DriverFuelView()
 
         case .faults:
             NavigationStack {
@@ -42,18 +38,10 @@ struct DriverTabView: View {
             }
 
         case .records:
-            DriverTabPlaceholderView(
-                title: "Records",
-                subtitle: "Driver records features are coming next.",
-                icon: "doc.text"
-            )
+            DriverRecordsView()
 
         case .settings:
-            DriverTabPlaceholderView(
-                title: "Settings",
-                subtitle: "Driver settings features are coming next.",
-                icon: "gearshape"
-            )
+            DriverSettingsView()
         }
     }
 

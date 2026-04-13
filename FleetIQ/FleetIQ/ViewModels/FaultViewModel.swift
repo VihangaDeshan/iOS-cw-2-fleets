@@ -21,12 +21,13 @@ final class FaultViewModel: ObservableObject {
     @Published var myFaults: [FaultReportEntity] = []
     @Published var isSending: Bool = false
     @Published var openFaultCount: Int = 0
+    @Published private(set) var faultPhotoReferences: [UUID: [String]] = [:]
 
     // MARK: - Private Properties
     private let context = PersistenceController.shared.viewContext
     private let firestoreService = FirestoreService.shared
     private let locationService = LocationService()
-    private var resolvingPhotoURLFaultIDs: Set<String> = []
+    private var resolvingPhotoReferenceKeys: Set<String> = []
 
     private var managerFaultListener: ListenerRegistration?
     private var myFaultListener: ListenerRegistration?
@@ -159,6 +160,10 @@ final class FaultViewModel: ObservableObject {
         localFault.photoURL = primaryPhotoReference
         localFault.createdAt = Date()
 
+        if !photoReferences.isEmpty {
+            faultPhotoReferences[faultUUID] = deduplicatedPhotoReferences(photoReferences)
+        }
+
         try context.save()
 
         myFaults.insert(localFault, at: 0)
@@ -242,6 +247,22 @@ final class FaultViewModel: ObservableObject {
         recalculateOpenFaultCount()
     }
 
+    /// Returns all known photo references for a fault (URLs or storage placeholders).
+    func photoReferences(for fault: FaultReportEntity) -> [String] {
+        if let faultId = fault.id,
+           let references = faultPhotoReferences[faultId],
+           !references.isEmpty {
+            return references
+        }
+
+        guard let single = fault.photoURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !single.isEmpty else {
+            return []
+        }
+
+        return [single]
+    }
+
     // MARK: - Private Helpers
     private enum FaultSyncTarget {
         case manager
@@ -286,8 +307,9 @@ final class FaultViewModel: ObservableObject {
             ?? ""
         entity.urgency = (data["urgency"] as? String ?? "medium")
         entity.status = (data["status"] as? String ?? "open")
-        let photoReference = preferredPhotoReference(from: data)
-        entity.photoURL = photoReference
+        let references = photoReferences(from: data)
+        faultPhotoReferences[faultUUID] = references
+        entity.photoURL = preferredPhotoReference(from: references)
         entity.latitude = numericValue(from: data["latitude"])
         entity.longitude = numericValue(from: data["longitude"])
         entity.createdAt = parseDateValue(data["createdAt"]) ?? Date()
@@ -296,13 +318,12 @@ final class FaultViewModel: ObservableObject {
             entity.vehicleId = vehicleUUID
         }
 
-        if let photoReference,
-           photoReference.hasPrefix("storage_path:"),
-           let fleetId,
-           !fleetId.isEmpty {
-            resolvePendingPhotoURLIfNeeded(
-                photoReference,
-                faultId: faultUUID.uuidString,
+        if let fleetId,
+           !fleetId.isEmpty,
+           !references.isEmpty {
+            resolvePendingPhotoReferencesIfNeeded(
+                references,
+                faultId: faultUUID,
                 fleetId: fleetId,
                 entity: entity
             )
@@ -365,60 +386,99 @@ final class FaultViewModel: ObservableObject {
         return 0
     }
 
-    private func preferredPhotoReference(from data: [String: Any]) -> String? {
-        if let single = data["photoURL"] as? String,
-           !single.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return single
+    private func photoReferences(from data: [String: Any]) -> [String] {
+        var references: [String] = []
+
+        if let list = data["photoURLs"] as? [String] {
+            references.append(contentsOf: list)
         }
 
-        if let list = data["photoURLs"] as? [String],
-           !list.isEmpty {
-            return list.first(where: { $0.hasPrefix("http") }) ?? list.first
+        if let single = data["photoURL"] as? String {
+            references.append(single)
         }
 
-        return nil
+        return deduplicatedPhotoReferences(references)
     }
 
-    private func resolvePendingPhotoURLIfNeeded(
-        _ reference: String,
-        faultId: String,
+    private func deduplicatedPhotoReferences(_ references: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+
+        for rawReference in references {
+            let reference = rawReference.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !reference.isEmpty, !seen.contains(reference) else {
+                continue
+            }
+
+            seen.insert(reference)
+            output.append(reference)
+        }
+
+        return output
+    }
+
+    private func preferredPhotoReference(from references: [String]) -> String? {
+        if let preferred = references.first(where: { $0.hasPrefix("http://") || $0.hasPrefix("https://") }) {
+            return preferred
+        }
+
+        return references.first
+    }
+
+    private func resolvePendingPhotoReferencesIfNeeded(
+        _ references: [String],
+        faultId: UUID,
         fleetId: String,
         entity: FaultReportEntity
     ) {
-        guard !resolvingPhotoURLFaultIDs.contains(faultId) else {
-            return
-        }
-
-        resolvingPhotoURLFaultIDs.insert(faultId)
-
-        Task {
-            defer {
-                resolvingPhotoURLFaultIDs.remove(faultId)
+        for reference in references where reference.hasPrefix("storage_path:") {
+            let key = "\(faultId.uuidString)|\(reference)"
+            guard !resolvingPhotoReferenceKeys.contains(key) else {
+                continue
             }
 
-            do {
-                guard let resolvedURL = try await firestoreService.resolveStoragePathReference(reference),
-                      !resolvedURL.isEmpty,
-                      entity.managedObjectContext != nil else {
-                    return
+            resolvingPhotoReferenceKeys.insert(key)
+
+            Task {
+                defer {
+                    resolvingPhotoReferenceKeys.remove(key)
                 }
 
-                entity.photoURL = resolvedURL
-                try context.save()
+                do {
+                    guard let resolvedURL = try await firestoreService.resolveStoragePathReference(reference),
+                          !resolvedURL.isEmpty,
+                          entity.managedObjectContext != nil else {
+                        return
+                    }
 
-                try await firestoreService.updateFaultReport(
-                    fleetId: fleetId,
-                    faultId: faultId,
-                    data: [
-                        "photoURL": resolvedURL,
+                    let existing = faultPhotoReferences[faultId] ?? references
+                    let replaced = existing.map { $0 == reference ? resolvedURL : $0 }
+                    let deduplicated = deduplicatedPhotoReferences(replaced)
+                    faultPhotoReferences[faultId] = deduplicated
+
+                    let preferred = preferredPhotoReference(from: deduplicated)
+                    entity.photoURL = preferred
+                    try context.save()
+
+                    var updatePayload: [String: Any] = [
+                        "photoURLs": deduplicated,
                         "updatedAt": Timestamp(date: Date())
                     ]
-                )
-            } catch {
-                #if DEBUG
-                let nsError = error as NSError
-                print("[FaultViewModel] Deferred photo URL resolution failed for \(faultId): \(nsError.domain) (\(nsError.code)) - \(nsError.localizedDescription)")
-                #endif
+                    if let preferred {
+                        updatePayload["photoURL"] = preferred
+                    }
+
+                    try await firestoreService.updateFaultReport(
+                        fleetId: fleetId,
+                        faultId: faultId.uuidString,
+                        data: updatePayload
+                    )
+                } catch {
+                    #if DEBUG
+                    let nsError = error as NSError
+                    print("[FaultViewModel] Deferred photo URL resolution failed for \(faultId.uuidString): \(nsError.domain) (\(nsError.code)) - \(nsError.localizedDescription)")
+                    #endif
+                }
             }
         }
     }

@@ -12,7 +12,7 @@ struct DriverHomeView: View {
     @EnvironmentObject private var authViewModel: AuthViewModel
     @StateObject private var viewModel = DriverHomeViewModel()
 
-    @State private var showTripPlaceholder = false
+    @State private var showTripUnavailableAlert = false
 
     private var startKey: String {
         "\(authViewModel.currentUID)|\(authViewModel.fleetId)|\(authViewModel.assignedVehicleId)"
@@ -35,10 +35,10 @@ struct DriverHomeView: View {
             }
             .background(Color.systemGroupedBg)
             .navigationBarHidden(true)
-            .alert("Trip Logging", isPresented: $showTripPlaceholder) {
+            .alert("No Vehicle Assigned", isPresented: $showTripUnavailableAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
-                Text("Start Trip will be connected in the trip module steps.")
+                Text("Ask your manager to assign a vehicle before creating trip logs.")
             }
         }
         .task(id: startKey) {
@@ -66,9 +66,15 @@ struct DriverHomeView: View {
                     .foregroundStyle(.black)
             }
 
-            Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: 40, weight: .regular))
-                .foregroundStyle(.black)
+            NavigationLink {
+                DriverProfileView()
+                    .environmentObject(authViewModel)
+            } label: {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 40, weight: .regular))
+                    .foregroundStyle(.black)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -231,13 +237,28 @@ struct DriverHomeView: View {
             }
 
             HStack(spacing: 12) {
-                actionCard(
-                    icon: "play.circle",
-                    iconColor: Color(hex: "1562D4"),
-                    iconBackground: Color(hex: "E6EDF9"),
-                    title: "Start Trip"
-                ) {
-                    showTripPlaceholder = true
+                if let vehicle = viewModel.assignedVehicle {
+                    NavigationLink {
+                        TripLogView(vehicle: vehicle)
+                            .environmentObject(authViewModel)
+                    } label: {
+                        actionCardLabel(
+                            icon: "play.circle",
+                            iconColor: Color(hex: "1562D4"),
+                            iconBackground: Color(hex: "E6EDF9"),
+                            title: "Start Trip"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    actionCard(
+                        icon: "play.circle",
+                        iconColor: Color(hex: "1562D4"),
+                        iconBackground: Color(hex: "E6EDF9"),
+                        title: "Start Trip"
+                    ) {
+                        showTripUnavailableAlert = true
+                    }
                 }
 
                 NavigationLink {
@@ -308,18 +329,49 @@ struct DriverHomeView: View {
                 .font(.headline.weight(.bold))
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Trip and fuel events will appear here.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                if viewModel.todayActivityItems.isEmpty {
+                    Text("No trip or fuel activity logged today.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
 
-                Text("Fuel logs today: \(viewModel.todayFuelLogs)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text("Fuel logs today: \(viewModel.todayFuelLogs)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.todayActivityItems) { item in
+                        activityRow(item)
+                    }
+                }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    private func activityRow(_ item: DriverActivityItem) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: item.kind == .trip ? "road.lanes" : "fuelpump")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(item.kind == .trip ? Color.navyPrimary : Color.statusDueSoon)
+                .frame(width: 14, height: 14)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(item.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Text(item.timestamp.formatted(date: .omitted, time: .shortened))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
