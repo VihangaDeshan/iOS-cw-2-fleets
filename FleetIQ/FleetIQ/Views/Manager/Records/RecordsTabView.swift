@@ -11,10 +11,12 @@ import CoreData
 // MARK: - Records Tab View
 struct RecordsTabView: View {
     @EnvironmentObject private var fleetViewModel: FleetViewModel
+    @EnvironmentObject private var authViewModel: AuthViewModel
     @Environment(\.managedObjectContext) private var context
 
     @State private var serviceCount = 0
     @State private var fuelCount = 0
+    @State private var tripCount = 0
 
     var body: some View {
         NavigationStack {
@@ -35,6 +37,14 @@ struct RecordsTabView: View {
                             .fontWeight(.bold)
                             .foregroundColor(.navyPrimary)
                     }
+
+                    HStack {
+                        Label("Trip Logs", systemImage: "road.lanes")
+                        Spacer()
+                        Text("\(tripCount)")
+                            .fontWeight(.bold)
+                            .foregroundColor(.navyPrimary)
+                    }
                 }
 
                 Section("VEHICLES") {
@@ -44,7 +54,8 @@ struct RecordsTabView: View {
                     } else {
                         ForEach(fleetViewModel.vehicles, id: \.id) { vehicle in
                             NavigationLink {
-                                ServiceHistoryView(vehicle: vehicle)
+                                VehicleRecordsView(vehicle: vehicle)
+                                    .environmentObject(authViewModel)
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(vehicle.registration ?? "Unknown")
@@ -67,13 +78,16 @@ struct RecordsTabView: View {
     private func loadCounts() {
         let serviceRequest = ServiceRecordEntity.fetchRequest()
         let fuelRequest = FuelLogEntity.fetchRequest()
+        let tripRequest = TripLogEntity.fetchRequest()
 
         do {
             serviceCount = try context.count(for: serviceRequest)
             fuelCount = try context.count(for: fuelRequest)
+            tripCount = try context.count(for: tripRequest)
         } catch {
             serviceCount = 0
             fuelCount = 0
+            tripCount = 0
         }
     }
 }

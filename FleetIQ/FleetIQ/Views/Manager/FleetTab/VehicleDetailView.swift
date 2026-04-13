@@ -446,6 +446,16 @@ struct VehicleDetailView: View {
             Divider()
                 .padding(.leading, 48)
 
+            NavigationLink {
+                TripHistoryView(vehicle: viewModel.vehicle)
+                    .environmentObject(authViewModel)
+            } label: {
+                actionRowLabel(icon: "road.lanes", title: "View Trip History")
+            }
+
+            Divider()
+                .padding(.leading, 48)
+
             actionRow(
                 icon: "dollarsign.circle.fill",
                 title: "View Cost Report"
