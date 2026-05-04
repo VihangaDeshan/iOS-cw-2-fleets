@@ -107,6 +107,7 @@ struct FleetIQApp: App {
             .environment(\.managedObjectContext, persistenceController.container.viewContext)
             .task {
                 authViewModel.startAuthStateListenerIfNeeded()
+                await NotificationService.shared.requestPermission()
             }
             .onChange(of: scenePhase) { _, phase in
                 handleScenePhaseChange(phase)

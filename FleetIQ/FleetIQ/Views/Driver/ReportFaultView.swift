@@ -175,6 +175,9 @@ struct ReportFaultView: View {
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Urgency: \(urgency.title)")
+                    .accessibilityHint("Tap to select this urgency level")
+                    .accessibilityAddTraits(selectedUrgency == urgency ? .isSelected : [])
                 }
             }
         }
@@ -256,6 +259,8 @@ struct ReportFaultView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .disabled(!canSubmit)
+        .accessibilityLabel("Send fault report")
+        .accessibilityHint("Submits report to manager immediately")
         .padding(.top, 4)
     }
 
@@ -384,6 +389,8 @@ private struct PhotoSlotView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Attach photo to fault report")
+        .accessibilityHint("Opens photo library")
         .onChange(of: item) { _, newItem in
             Task {
                 await loadImage(from: newItem)

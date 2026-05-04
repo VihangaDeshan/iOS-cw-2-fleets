@@ -230,7 +230,8 @@ struct DocumentVaultView: View {
             let photoURL = try await firestoreService.uploadPhoto(image, path: storagePath)
 
             let entity = documentsByType[docType] ?? DocumentEntity(context: context)
-            entity.id = entity.id ?? UUID()
+            let savedDocumentId = entity.id ?? UUID()
+            entity.id = savedDocumentId
             entity.vehicleId = vehicleId
             entity.type = docType
             entity.expiryDate = pendingExpiryDate
@@ -259,6 +260,19 @@ struct DocumentVaultView: View {
                 fleetId: authViewModel.fleetId,
                 docId: docId
             )
+
+            NotificationService.shared.scheduleExpiryWarning(
+                vehicleRegistration: vehicle.registration ?? "",
+                documentType: docType,
+                expiryDate: pendingExpiryDate,
+                documentId: savedDocumentId,
+                daysBefore: 30)
+            NotificationService.shared.scheduleExpiryWarning(
+                vehicleRegistration: vehicle.registration ?? "",
+                documentType: docType,
+                expiryDate: pendingExpiryDate,
+                documentId: savedDocumentId,
+                daysBefore: 7)
 
             infoMessage = "\(docType.capitalized) document saved successfully."
             loadDocuments()

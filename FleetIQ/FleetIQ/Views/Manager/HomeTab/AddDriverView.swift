@@ -144,9 +144,9 @@ struct AddDriverView: View {
                 try await firestoreService.updateVehicle(
                     fleetId: authViewModel.fleetId,
                     vehicleId: assignedVehicleId.uuidString,
-                    data: ["assignedDriverId": normalizedName]
+                    data: ["assignedDriverId": driverId.uuidString]
                 )
-                vehicle.assignedDriverId = normalizedName
+                vehicle.assignedDriverId = driverId.uuidString
 
                 try await firestoreService.updateDriverUserAssignment(
                     userId: driverId.uuidString,

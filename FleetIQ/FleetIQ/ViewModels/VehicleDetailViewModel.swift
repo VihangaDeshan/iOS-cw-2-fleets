@@ -178,13 +178,24 @@ final class VehicleDetailViewModel: ObservableObject {
         isLoading = true
 
         do {
-            vehicle.assignedDriverId = (normalizedDriverName?.isEmpty == false) ? normalizedDriverName : nil
+            // Store the userId (UUID) so the display layer can always look up the correct name.
+            // Fall back to the name string only when there is no userId (legacy / manual assignment).
+            let assignedDriverIdValue: String?
+            if let userId = normalizedDriverUserId, !userId.isEmpty {
+                assignedDriverIdValue = userId
+            } else if let name = normalizedDriverName, !name.isEmpty {
+                assignedDriverIdValue = name
+            } else {
+                assignedDriverIdValue = nil
+            }
+
+            vehicle.assignedDriverId = assignedDriverIdValue
             try context.save()
 
             try await firestoreService.updateVehicle(
                 fleetId: fleetId,
                 vehicleId: vehicleId,
-                data: ["assignedDriverId": normalizedDriverName ?? ""]
+                data: ["assignedDriverId": assignedDriverIdValue ?? ""]
             )
 
             if let previousUserId = normalizedPreviousUserId,

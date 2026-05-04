@@ -10,10 +10,14 @@ import SwiftUI
 // MARK: - Manager Fault List View
 struct FaultListView: View {
     @EnvironmentObject private var authViewModel: AuthViewModel
+    @EnvironmentObject private var fleetViewModel: FleetViewModel
     @StateObject private var faultViewModel = FaultViewModel()
 
     @State private var selectedFilter: FaultListFilter = .all
     @State private var errorText: String = ""
+    @State private var driverNameById: [String: String] = [:]
+
+    private let firestoreService = FirestoreService.shared
 
     private var normalizedFleetId: String {
         authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -117,6 +121,7 @@ struct FaultListView: View {
 
                 errorText = ""
                 faultViewModel.startFaultListener(fleetId: normalizedFleetId)
+                await loadDriverNameMap()
             }
             .refreshable {
                 guard !normalizedFleetId.isEmpty else {
@@ -125,6 +130,7 @@ struct FaultListView: View {
 
                 errorText = ""
                 faultViewModel.startFaultListener(fleetId: normalizedFleetId)
+                await loadDriverNameMap()
             }
         }
     }
@@ -191,6 +197,10 @@ struct FaultListView: View {
                 if hasPhotoReference(fault) {
                     photoIndicator
                 }
+
+                Text(driverLabel(for: fault))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Text(formattedDate(fault.createdAt))
                     .font(.caption)
@@ -308,12 +318,48 @@ struct FaultListView: View {
     }
 
     private func shortVehicleLabel(for fault: FaultReportEntity) -> String {
-        let id = fault.vehicleId?.uuidString ?? ""
-        guard !id.isEmpty else {
-            return "Vehicle -"
+        guard let vehicleId = fault.vehicleId else {
+            return "Vehicle"
         }
 
-        return "Vehicle \(id.prefix(6))"
+        if let vehicle = fleetViewModel.vehicles.first(where: { $0.id == vehicleId }),
+           let registration = vehicle.registration,
+           !registration.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return registration
+        }
+
+        return "Vehicle"
+    }
+
+    private func driverLabel(for fault: FaultReportEntity) -> String {
+        let driverId = (fault.driverId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !driverId.isEmpty else {
+            return "Driver"
+        }
+
+        if let name = driverNameById[driverId], !name.isEmpty {
+            return name
+        }
+
+        return "Driver"
+    }
+
+    private func loadDriverNameMap() async {
+        do {
+            let drivers = try await firestoreService.fetchFleetDriverUsers(fleetId: normalizedFleetId)
+            var map: [String: String] = [:]
+
+            for driver in drivers {
+                let trimmedName = driver.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmedName.isEmpty {
+                    map[driver.userId] = trimmedName
+                }
+            }
+
+            driverNameById = map
+        } catch {
+            driverNameById = [:]
+        }
     }
 
     private func formattedDate(_ date: Date?) -> String {

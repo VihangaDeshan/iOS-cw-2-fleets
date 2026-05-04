@@ -53,7 +53,7 @@ struct DriverHomeView: View {
     private var headerSection: some View {
         HStack(alignment: .center) {
             Text("Hi \(displayName)")
-                .font(.system(size: 44, weight: .bold))
+                .font(.largeTitle.weight(.bold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
 
@@ -62,7 +62,7 @@ struct DriverHomeView: View {
             Button {
             } label: {
                 Image(systemName: "bell.fill")
-                    .font(.system(size: 29, weight: .semibold))
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(.black)
             }
 
@@ -71,7 +71,7 @@ struct DriverHomeView: View {
                     .environmentObject(authViewModel)
             } label: {
                 Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 40, weight: .regular))
+                    .font(.title2)
                     .foregroundStyle(.black)
             }
             .buttonStyle(.plain)
@@ -114,7 +114,7 @@ struct DriverHomeView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(viewModel.serviceStatus(for: vehicle).uppercased())
-                        .font(.system(size: 27, weight: .bold))
+                        .font(.title2.weight(.bold))
                         .opacity(0.001)
                         .frame(height: 0)
 
@@ -124,7 +124,7 @@ struct DriverHomeView: View {
                         .tracking(1)
 
                     Text(vehicle.registration ?? "Unknown")
-                        .font(.system(size: 48, weight: .heavy))
+                        .font(.largeTitle.weight(.heavy))
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.45)
@@ -183,7 +183,7 @@ struct DriverHomeView: View {
                 .tracking(0.8)
 
             Text(value)
-                .font(.system(size: 39, weight: .bold))
+                .font(.largeTitle.weight(.bold))
                 .opacity(0.001)
                 .frame(height: 0)
 
@@ -209,7 +209,7 @@ struct DriverHomeView: View {
     private func statCard(title: String, value: String) -> some View {
         VStack(spacing: 7) {
             Text(title)
-                .font(.system(size: 12, weight: .bold))
+                .font(.caption.weight(.bold))
                 .foregroundStyle(Color(hex: "8595AD"))
 
             Text(value)
@@ -303,12 +303,12 @@ struct DriverHomeView: View {
                     .frame(width: 62, height: 62)
 
                 Image(systemName: icon)
-                    .font(.system(size: 31, weight: .semibold))
+                    .font(.title.weight(.semibold))
                     .opacity(0.001)
                     .frame(height: 0)
 
                 Image(systemName: icon)
-                    .font(.system(size: 29, weight: .semibold))
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(iconColor)
             }
 

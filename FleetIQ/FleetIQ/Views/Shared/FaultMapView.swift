@@ -99,6 +99,17 @@ struct FaultMapView: View {
                                             to: garage.coordinate)))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+
+                            if let phone = garage.phone {
+                                Label(phone, systemImage: "phone.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.green)
+                                    .onTapGesture {
+                                        if let url = URL(string: "tel:\(phone.filter { !$0.isWhitespace })") {
+                                            UIApplication.shared.open(url)
+                                        }
+                                    }
+                            }
                         }
 
                         Spacer()

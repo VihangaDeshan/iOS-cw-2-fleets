@@ -70,6 +70,8 @@ struct FaultDetailView: View {
                     }
                 }
                 .disabled(isResolving || selectedStatus == .resolved || normalizedFleetId.isEmpty)
+                .accessibilityLabel("Resolve this fault")
+                .accessibilityHint("Marks fault as resolved")
             }
         }
         .task {
@@ -368,7 +370,7 @@ struct FaultDetailView: View {
             return registration
         }
 
-        return "Vehicle \(vehicleId.uuidString.prefix(6))"
+        return "Unknown Vehicle"
     }
 
     private func loadDriverName() async -> String {
@@ -387,7 +389,7 @@ struct FaultDetailView: View {
             // Fallback to ID snippet for display-only metadata.
         }
 
-        return "Driver \(driverId.prefix(6))"
+        return "Unknown Driver"
     }
 
     private func writeStatus(_ status: ManagerFaultStatus) async {

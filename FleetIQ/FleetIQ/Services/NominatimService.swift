@@ -27,6 +27,7 @@ struct NominatimResult: Codable, Identifiable {
     let displayName: String
     let lat: String
     let lon: String
+    var phone: String?
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(
@@ -190,10 +191,16 @@ final class NominatimService {
                 ?? element.tags?["operator"]
                 ?? "Nearby Garage"
 
+            let phone = firstNonEmptyTag(
+                from: element.tags,
+                keys: ["phone", "contact:phone", "contact:mobile"]
+            )
+
             return NominatimResult(
                 displayName: name,
                 lat: String(coordinate.latitude),
-                lon: String(coordinate.longitude)
+                lon: String(coordinate.longitude),
+                phone: phone
             )
         }
 
@@ -236,4 +243,15 @@ private extension Double {
         let divisor = pow(10.0, Double(places))
         return (self * divisor).rounded() / divisor
     }
+}
+
+private func firstNonEmptyTag(from tags: [String: String]?, keys: [String]) -> String? {
+    for key in keys {
+        guard let value = tags?[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            continue
+        }
+        return value
+    }
+    return nil
 }

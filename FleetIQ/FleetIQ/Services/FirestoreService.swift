@@ -849,8 +849,34 @@ class FirestoreService {
                 .collection("drivers")
         )
 
+        // Single-field query only — composite (fleetId + role) requires a Firestore
+        // composite index that may not exist. Role is filtered client-side below.
+        let usersByFleetId = await fetchUserDriverDocsIfAllowed(
+            for: db.collection("users")
+                .whereField("fleetId", isEqualTo: normalizedFleetId)
+        )
+
         let fleetDrivers = mapFleetDriverDocsToFleetDrivers(fleetCollectionDocs, fleetId: normalizedFleetId)
-        return mergeFleetDriverLists([fleetDrivers])
+        let userDriversByFleetId = mapUserDocsToFleetDrivers(usersByFleetId, fleetId: normalizedFleetId)
+
+        // Merge all sources; fleet-collection docs may have empty names when the
+        // driver registered via Auth and was never saved via AddDriverView.
+        // Apply the display-name fallback AFTER merging so the users-collection
+        // name (e.g. "Deshan") wins over the fleet-doc empty-string.
+        let merged = mergeFleetDriverLists([fleetDrivers, userDriversByFleetId])
+        return merged.map { driver in
+            guard driver.name.isEmpty else { return driver }
+            let fallbackName = driver.email.split(separator: "@").first.map(String.init) ?? "Driver"
+            return FleetDriverUser(
+                userId: driver.userId,
+                name: fallbackName,
+                email: driver.email,
+                phone: driver.phone,
+                fleetId: driver.fleetId,
+                role: driver.role,
+                assignedVehicleId: driver.assignedVehicleId
+            )
+        }
     }
 
     /// Creates or updates a manager-created driver profile in users collection.
@@ -1117,6 +1143,8 @@ class FirestoreService {
     }
 
     /// Maps fleet drivers collection docs into fleet-driver models.
+    /// Returns empty name when the doc has no name field so mergeFleetDriverLists
+    /// can prefer the richer users-collection document instead.
     private func mapFleetDriverDocsToFleetDrivers(_ docs: [QueryDocumentSnapshot], fleetId: String) -> [FleetDriverUser] {
         docs.compactMap { doc in
             let data = doc.data()
@@ -1125,10 +1153,19 @@ class FirestoreService {
                 return nil
             }
 
+            // Use the raw name value (empty string if missing) so that mergeDriver
+            // can prefer a richer name from the users collection.
+            let rawName = ["name", "fullName", "displayName", "username"]
+                .compactMap { data[$0] as? String }
+                .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+
+            let resolvedEmail = driverEmail(from: data)
+
             return FleetDriverUser(
                 userId: doc.documentID,
-                name: data["name"] as? String ?? "",
-                email: data["email"] as? String ?? "",
+                name: rawName,
+                email: resolvedEmail,
                 phone: data["phone"] as? String ?? "",
                 fleetId: fleetId,
                 role: role,
@@ -1155,16 +1192,59 @@ class FirestoreService {
                 ?? (data["fleetName"] as? String)
                 ?? fleetId
 
+            let resolvedName = driverDisplayName(from: data, userId: doc.documentID)
+            let resolvedEmail = driverEmail(from: data)
+
             return FleetDriverUser(
                 userId: doc.documentID,
-                name: data["name"] as? String ?? "",
-                email: data["email"] as? String ?? "",
+                name: resolvedName,
+                email: resolvedEmail,
                 phone: data["phone"] as? String ?? "",
                 fleetId: resolvedFleetId,
                 role: role,
                 assignedVehicleId: data["assignedVehicleId"] as? String ?? ""
             )
         }
+    }
+
+    private func driverDisplayName(from data: [String: Any], userId: String) -> String {
+        let candidates: [String?] = [
+            data["name"] as? String,
+            data["fullName"] as? String,
+            data["displayName"] as? String,
+            data["username"] as? String
+        ]
+
+        for candidate in candidates {
+            let trimmed = (candidate ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+
+        let email = driverEmail(from: data)
+        if let prefix = email.split(separator: "@").first,
+           !prefix.isEmpty {
+            return String(prefix)
+        }
+
+        return "Driver"
+    }
+
+    private func driverEmail(from data: [String: Any]) -> String {
+        let candidates: [String?] = [
+            data["email"] as? String,
+            data["mail"] as? String
+        ]
+
+        for candidate in candidates {
+            let trimmed = (candidate ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+
+        return ""
     }
 
     /// Merges driver lists from multiple Firestore sources by user id.

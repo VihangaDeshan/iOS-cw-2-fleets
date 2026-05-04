@@ -7,13 +7,16 @@
 
 import SwiftUI
 import CoreData
+import Charts
 
 // MARK: - Analytics View
 struct AnalyticsView: View {
     @EnvironmentObject private var fleetViewModel: FleetViewModel
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var monthlySpend: Double = 0
+    @StateObject private var analyticsVM = AnalyticsViewModel()
+
     @State private var averageEfficiency: Double = 0
     @State private var bestVehicleRegistration = "-"
     @State private var openFaultCount = 0
@@ -23,6 +26,10 @@ struct AnalyticsView: View {
         ScrollView {
             VStack(spacing: 14) {
                 statusCard
+                monthNavigationCard
+                summaryStatsRow
+                monthlyCostCard
+                spendingByCategoryCard
                 efficiencyCard
                 alertsCard
             }
@@ -31,7 +38,10 @@ struct AnalyticsView: View {
         .background(Color.systemGroupedBg)
         .navigationTitle("Analytics")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: loadMetrics)
+        .onAppear {
+            analyticsVM.loadData()
+            loadMetrics()
+        }
     }
 
     private var statusCard: some View {
@@ -44,7 +54,7 @@ struct AnalyticsView: View {
                         .tracking(1)
 
                     Text("\(fleetViewModel.vehicles.count) Vehicles")
-                        .font(.system(size: 40, weight: .bold))
+                        .font(.largeTitle.weight(.bold))
                         .foregroundColor(.white)
                 }
 
@@ -55,7 +65,7 @@ struct AnalyticsView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.white.opacity(0.65))
                         .tracking(1)
-                    Text("LKR \(String(format: "%.0f", monthlySpend))")
+                    Text("LKR \(formatted(analyticsVM.totalSpentLKR))")
                         .font(.title2.weight(.bold))
                         .foregroundColor(.white)
                 }
@@ -78,6 +88,167 @@ struct AnalyticsView: View {
         .cornerRadius(20)
     }
 
+    private var monthNavigationCard: some View {
+        HStack {
+            Button {
+                analyticsVM.previousMonth()
+            } label: {
+                Image(systemName: "chevron.left.circle.fill")
+                    .font(.title2)
+                    .foregroundColor(.navyPrimary)
+            }
+            .accessibilityLabel("Previous month")
+            .accessibilityHint("Moves analytics back one month")
+
+            Spacer()
+
+            Text(analyticsVM.monthDisplayString)
+                .font(.headline)
+
+            Spacer()
+
+            Button {
+                analyticsVM.nextMonth()
+            } label: {
+                Image(systemName: "chevron.right.circle.fill")
+                    .font(.title2)
+                    .foregroundColor(.navyPrimary)
+            }
+            .accessibilityLabel("Next month")
+            .accessibilityHint("Moves analytics forward one month")
+        }
+        .padding(14)
+        .background(Color.white)
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+    }
+
+    private var summaryStatsRow: some View {
+        HStack(spacing: 8) {
+            statMiniCard(
+                label: "LKR Spent",
+                value: "LKR \(formatted(analyticsVM.totalSpentLKR))",
+                valueColor: .statusOverdue)
+            statMiniCard(
+                label: "Services",
+                value: "\(analyticsVM.totalServices)",
+                valueColor: .primary)
+            statMiniCard(
+                label: "Open Faults",
+                value: "\(analyticsVM.totalFaults)",
+                valueColor: .statusDueSoon)
+        }
+    }
+
+    private var monthlyCostCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("MONTHLY COST PER VEHICLE")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary)
+                .tracking(0.5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if analyticsVM.vehicleCosts.isEmpty {
+                Text("No records for \(analyticsVM.monthDisplayString)")
+                    .foregroundColor(.secondary)
+                    .padding()
+            } else {
+                Chart(analyticsVM.vehicleCosts) { item in
+                    BarMark(
+                        x: .value("Vehicle", item.registration),
+                        y: .value("LKR", item.totalCostLKR))
+                    .foregroundStyle(Color.navyPrimary)
+                    .cornerRadius(4)
+                    .annotation(position: .top) {
+                        Text("LKR \(formatted(item.totalCostLKR))")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(height: 200)
+                .chartXAxis {
+                    AxisMarks { _ in
+                        AxisValueLabel()
+                            .font(.caption2)
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks { _ in
+                        AxisGridLine()
+                        AxisValueLabel()
+                            .font(.caption2)
+                    }
+                }
+                .animation(
+                    reduceMotion ? .none : .easeInOut,
+                    value: analyticsVM.vehicleCosts.count)
+                .accessibilityLabel(
+                    "Bar chart showing monthly cost per vehicle for \(analyticsVM.monthDisplayString)")
+            }
+
+            Text("Swift Charts · BarMark")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(14)
+        .background(Color.white)
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+    }
+
+    private var spendingByCategoryCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("FLEET SPENDING BY CATEGORY")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary)
+                .tracking(0.5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if analyticsVM.categoryCosts.isEmpty {
+                Text("No category data this month")
+                    .foregroundColor(.secondary)
+                    .padding()
+            } else {
+                Chart(analyticsVM.categoryCosts) { item in
+                    BarMark(
+                        x: .value("Month", "This Month"),
+                        y: .value("LKR", item.costLKR))
+                    .foregroundStyle(
+                        by: .value("Category", item.category))
+                    .cornerRadius(4)
+                }
+                .frame(height: 160)
+                .chartForegroundStyleScale(range: categoryPalette)
+                .animation(
+                    reduceMotion ? .none : .easeInOut,
+                    value: analyticsVM.categoryCosts.count)
+                .accessibilityLabel(
+                    "Stacked bar chart showing fleet spending by category")
+
+                ForEach(Array(analyticsVM.categoryCosts.enumerated()), id: \.element.id) { index, item in
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(categoryColor(for: index))
+                            .frame(width: 10, height: 10)
+                        Text(item.category)
+                            .font(.caption)
+                        Spacer()
+                        Text("LKR \(formatted(item.costLKR))")
+                            .font(.caption.weight(.semibold))
+                    }
+                }
+            }
+
+            Text("BarMark + foregroundStyle(by:.value)")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(14)
+        .background(Color.white)
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+    }
+
     private var efficiencyCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -88,7 +259,7 @@ struct AnalyticsView: View {
                         .tracking(1)
 
                     Text("\(String(format: "%.1f", averageEfficiency)) km/L")
-                        .font(.system(size: 46, weight: .bold))
+                        .font(.largeTitle.weight(.bold))
                         .foregroundColor(.white)
                 }
 
@@ -159,6 +330,49 @@ struct AnalyticsView: View {
         }
     }
 
+    private var categoryPalette: [Color] {
+        [
+            Color.navyPrimary,
+            Color.navySecondary,
+            Color.driverGreen,
+            Color.statusDueSoon,
+            Color.statusOverdue,
+            Color(hex: "2E7D52")
+        ]
+    }
+
+    private func categoryColor(for index: Int) -> Color {
+        guard !categoryPalette.isEmpty else { return .navyPrimary }
+        return categoryPalette[index % categoryPalette.count]
+    }
+
+    private func formatted(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "0"
+    }
+
+    private func statMiniCard(
+        label: String,
+        value: String,
+        valueColor: Color
+    ) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.title3.weight(.bold))
+                .foregroundColor(valueColor)
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(10)
+        .background(Color.white)
+        .cornerRadius(10)
+        .shadow(color: .black.opacity(0.07), radius: 3)
+    }
+
     private func loadMetrics() {
         let serviceRequest = ServiceRecordEntity.fetchRequest()
         let fuelRequest = FuelLogEntity.fetchRequest()
@@ -185,8 +399,6 @@ struct AnalyticsView: View {
             }
             .reduce(0) { $0 + $1.totalCostLKR }
 
-            monthlySpend = monthlyService + monthlyFuel
-
             let validEfficiencies = fuelLogs.filter { $0.kmPerLitre > 0 }
             averageEfficiency = validEfficiencies.isEmpty
                 ? 0
@@ -200,7 +412,6 @@ struct AnalyticsView: View {
                 bestVehicleRegistration = "-"
             }
         } catch {
-            monthlySpend = 0
             averageEfficiency = 0
             bestVehicleRegistration = "-"
         }

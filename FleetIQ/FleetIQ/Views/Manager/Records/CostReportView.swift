@@ -25,6 +25,23 @@ struct CostReportView: View {
         }
         .navigationTitle("Cost Report")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    let text = ShareService.shared.generateCostReportText(
+                        registration: vehicle.registration ?? "",
+                        lifetimeCost: totalServiceCost + totalFuelCost,
+                        monthlyAverage: monthlyAverage,
+                        costPerKm: costPerKm,
+                        categorySplit: categoryBreakdown)
+                    ShareService.shared.shareText(text)
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel("Share cost report")
+                .accessibilityHint("Opens share sheet for WhatsApp or email")
+            }
+        }
         .onAppear(perform: loadData)
     }
 
@@ -89,6 +106,42 @@ struct CostReportView: View {
 
     private var totalFuelCost: Double {
         fuelLogs.reduce(0) { $0 + $1.totalCostLKR }
+    }
+
+    private var totalCost: Double {
+        totalServiceCost + totalFuelCost
+    }
+
+    private var monthlyAverage: Double {
+        totalCost / Double(max(monthlyTotals.count, 1))
+    }
+
+    private var totalKmDriven: Double {
+        let mileageValues = serviceRecords.compactMap { $0.mileageAtService }
+        if let latestMileage = mileageValues.max(), latestMileage > 0 {
+            return latestMileage
+        }
+
+        return Double(vehicle.currentMileage)
+    }
+
+    private var costPerKm: Double {
+        totalKmDriven > 0 ? totalCost / totalKmDriven : 0
+    }
+
+    private var categoryBreakdown: [String: Double] {
+        var categories: [String: Double] = [:]
+
+        for record in serviceRecords {
+            let category = record.serviceType ?? "Other"
+            categories[category, default: 0] += record.costLKR
+        }
+
+        if totalFuelCost > 0 {
+            categories["Fuel"] = totalFuelCost
+        }
+
+        return categories
     }
 
     private var monthlyTotals: [(monthKey: String, total: Double)] {
