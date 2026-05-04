@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import CoreLocation
 
 // MARK: - Fault Confirmation View
 struct FaultConfirmationView: View {
@@ -16,6 +17,8 @@ struct FaultConfirmationView: View {
     @StateObject private var faultViewModel = FaultViewModel()
     @State private var assignedVehicle: VehicleEntity?
     @State private var deliveryDurationSeconds: Double = 0.2
+    @State private var nearbyGarages: [NominatimResult] = []
+    @State private var isLoadingGarages = false
 
     let faultId: UUID
     let submittedAt: Date
@@ -65,13 +68,27 @@ struct FaultConfirmationView: View {
         }
     }
 
+    private var submittedCoordinate: CLLocationCoordinate2D? {
+        guard let fault = currentFault else {
+            return nil
+        }
+
+        let lat = fault.latitude
+        let lon = fault.longitude
+        guard !(lat == 0 && lon == 0) else {
+            return nil
+        }
+
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
                 alarmHeader
                 deliveredCard
                 managerStatusCard
-                garagesPlaceholderCard
+                garagesSection
             }
             .padding(.horizontal, 16)
             .padding(.top, 24)
@@ -119,6 +136,9 @@ struct FaultConfirmationView: View {
                 fleetId: normalizedFleetId,
                 driverId: normalizedDriverId
             )
+        }
+        .task(id: currentFault?.id) {
+            await loadNearbyGarages()
         }
     }
 
@@ -222,18 +242,61 @@ struct FaultConfirmationView: View {
         )
     }
 
-    private var garagesPlaceholderCard: some View {
+    private var garagesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Nearest Garages")
-                .font(.headline)
+            Text("NEAREST GARAGES")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.72))
+                .tracking(0.5)
 
-            Text("Garage recommendations will appear here in Part 8 using your report location.")
-                .font(.subheadline)
-                .foregroundStyle(Color.white.opacity(0.82))
+            if isLoadingGarages {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .tint(.white)
+                    Text("Finding nearby garages…")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.82))
+                }
+                .padding(.vertical, 4)
+            } else if nearbyGarages.isEmpty {
+                Text("Garage recommendations will appear here in Part 8 using your report location.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.white.opacity(0.82))
 
-            Text("Map integration is coming next.")
-                .font(.caption)
-                .foregroundStyle(Color.white.opacity(0.72))
+                Text("Map integration is coming next.")
+                    .font(.caption)
+                    .foregroundStyle(Color.white.opacity(0.72))
+            } else {
+                ForEach(nearbyGarages) { garage in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "mappin.and.ellipse")
+                                .foregroundStyle(Color.white.opacity(0.9))
+
+                            Text(garage.displayName)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                                .foregroundStyle(.white)
+
+                            Spacer()
+                        }
+
+                        if let coordinate = submittedCoordinate {
+                            Text(String(format: "%.1f km away",
+                                        NominatimService.shared.distanceKm(
+                                            from: coordinate,
+                                            to: garage.coordinate)))
+                                .font(.caption)
+                                .foregroundStyle(Color.white.opacity(0.78))
+                        }
+                    }
+
+                    if garage.id != nearbyGarages.last?.id {
+                        Divider()
+                            .overlay(Color.white.opacity(0.16))
+                    }
+                }
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -294,6 +357,20 @@ struct FaultConfirmationView: View {
         request.predicate = NSPredicate(format: "id == %@", vehicleUUID as CVarArg)
 
         assignedVehicle = try? context.fetch(request).first
+    }
+
+    private func loadNearbyGarages() async {
+        guard let coordinate = submittedCoordinate else {
+            nearbyGarages = []
+            return
+        }
+
+        isLoadingGarages = true
+        nearbyGarages = (try? await NominatimService.shared.findNearestGarages(
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude
+        )) ?? []
+        isLoadingGarages = false
     }
 }
 

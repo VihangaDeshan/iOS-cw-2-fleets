@@ -364,6 +364,28 @@ private struct AddFuelLogSheet: View {
 
         isSaving = true
 
+        // Persist locally first to avoid duplicates when the realtime listener triggers
+        let log = FuelLogEntity(context: context)
+        log.id = logId
+        log.vehicleId = vehicleId
+        log.date = date
+        log.mileage = mileageValue
+        log.litres = litresValue
+        log.totalCostLKR = totalValue
+        log.costPerLitre = totalValue / litresValue
+        log.kmPerLitre = efficiency
+
+        vehicle.currentMileage = max(vehicle.currentMileage, mileageValue)
+
+        do {
+            try context.save()
+        } catch {
+            errorText = "Could not save fuel log locally."
+            isSaving = false
+            return
+        }
+
+        // Attempt cloud sync but keep local record if it fails
         do {
             let payload: [String: Any] = [
                 "id": logId.uuidString,
@@ -382,32 +404,16 @@ private struct AddFuelLogSheet: View {
                 logId: logId.uuidString
             )
         } catch {
-            errorText = "Cloud sync failed for fuel log."
+            errorText = "Cloud sync failed for fuel log; saved locally."
             isSaving = false
+            onSaved()
+            dismiss()
             return
         }
 
-        let log = FuelLogEntity(context: context)
-        log.id = logId
-        log.vehicleId = vehicleId
-        log.date = date
-        log.mileage = mileageValue
-        log.litres = litresValue
-        log.totalCostLKR = totalValue
-        log.costPerLitre = totalValue / litresValue
-        log.kmPerLitre = efficiency
-
-        vehicle.currentMileage = max(vehicle.currentMileage, mileageValue)
-
-        do {
-            try context.save()
-            onSaved()
-            isSaving = false
-            dismiss()
-        } catch {
-            errorText = "Could not save fuel log."
-            isSaving = false
-        }
+        onSaved()
+        isSaving = false
+        dismiss()
     }
 
     private func latestFuelLogMileage(for vehicleId: UUID) -> Double {

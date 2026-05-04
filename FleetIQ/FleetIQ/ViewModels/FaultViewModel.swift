@@ -119,7 +119,7 @@ final class FaultViewModel: ObservableObject {
             ?? photoReferences.first
             ?? (hadUploadFailure ? "upload_failed" : nil)
 
-        // 3) Save to Firestore
+        // 3) Prepare payload
         var payload: [String: Any] = [
             "id": faultUUID.uuidString,
             "vehicleId": vehicleUUID.uuidString,
@@ -142,13 +142,7 @@ final class FaultViewModel: ObservableObject {
             payload["photoURLs"] = photoReferences
         }
 
-        try await firestoreService.saveFaultReport(
-            payload,
-            fleetId: normalizedFleetId,
-            faultId: faultUUID.uuidString
-        )
-
-        // 4) Save to CoreData
+        // 4) Save locally BEFORE attempting cloud save to avoid duplicates
         let localFault = upsertFaultEntity(with: faultUUID)
         localFault.vehicleId = vehicleUUID
         localFault.driverId = normalizedDriverId
@@ -164,10 +158,29 @@ final class FaultViewModel: ObservableObject {
             faultPhotoReferences[faultUUID] = deduplicatedPhotoReferences(photoReferences)
         }
 
-        try context.save()
+        do {
+            try context.save()
+        } catch {
+            // If local save fails, propagate as before
+            throw NSError(domain: "FaultViewModel", code: -30, userInfo: [NSLocalizedDescriptionKey: "Failed to save fault locally."])
+        }
 
+        // Insert into in-memory lists for immediate UI feedback
         myFaults.insert(localFault, at: 0)
         recalculateOpenFaultCount()
+
+        // 5) Attempt cloud save; if it fails we keep the local record and report error to caller
+        do {
+            try await firestoreService.saveFaultReport(
+                payload,
+                fleetId: normalizedFleetId,
+                faultId: faultUUID.uuidString
+            )
+        } catch {
+            // leave local record intact; bubble error so callers can inform the user
+            throw error
+        }
+
         return faultUUID
     }
 

@@ -363,7 +363,7 @@ private struct PhotoSlotView: View {
                         .resizable()
                         .scaledToFill()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipped()
                 } else {
                     VStack(spacing: 6) {
                         Image(systemName: "photo.on.rectangle.angled")
@@ -377,6 +377,7 @@ private struct PhotoSlotView: View {
                 }
             }
             .frame(height: 98)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(Color(.systemGray4), style: StrokeStyle(lineWidth: 1, dash: [4]))

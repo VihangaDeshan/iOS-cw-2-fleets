@@ -120,6 +120,30 @@ final class TripLogViewModel: ObservableObject {
         isSaving = true
         defer { isSaving = false }
 
+        // Persist locally first so the realtime listener upsert does not create a duplicate
+        let trip = TripLogEntity(context: context)
+        trip.id = tripId
+        trip.vehicleId = vehicleId
+        trip.driverId = normalizedDriverId
+        trip.purpose = normalizedPurpose
+        trip.destination = normalizedDestination
+        trip.startMileage = startMileage
+        trip.endMileage = endMileage
+        trip.distanceKm = distanceKm
+        trip.date = date
+
+        if let vehicle {
+            vehicle.currentMileage = max(vehicle.currentMileage, endMileage)
+        }
+
+        do {
+            try context.save()
+        } catch {
+            errorMessage = "Could not save trip log locally."
+            return false
+        }
+
+        // Attempt cloud sync but keep local record if it fails. Using same id prevents duplicates.
         do {
             let payload: [String: Any] = [
                 "id": tripId.uuidString,
@@ -139,33 +163,14 @@ final class TripLogViewModel: ObservableObject {
                 logId: tripId.uuidString
             )
         } catch {
-            errorMessage = "Cloud sync failed for trip log."
-            return false
-        }
-
-        let trip = TripLogEntity(context: context)
-        trip.id = tripId
-        trip.vehicleId = vehicleId
-        trip.driverId = normalizedDriverId
-        trip.purpose = normalizedPurpose
-        trip.destination = normalizedDestination
-        trip.startMileage = startMileage
-        trip.endMileage = endMileage
-        trip.distanceKm = distanceKm
-        trip.date = date
-
-        if let vehicle {
-            vehicle.currentMileage = max(vehicle.currentMileage, endMileage)
-        }
-
-        do {
-            try context.save()
+            errorMessage = "Cloud sync failed for trip log; saved locally."
+            // still return true because local save succeeded
             loadTrips(for: vehicleId)
             return true
-        } catch {
-            errorMessage = "Could not save trip log locally."
-            return false
         }
+
+        loadTrips(for: vehicleId)
+        return true
     }
 
     /// Deletes a trip from CoreData and Firestore.

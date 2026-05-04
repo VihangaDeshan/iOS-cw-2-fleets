@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import MapKit
 
 // MARK: - Manager Fault Detail View
 struct FaultDetailView: View {
@@ -22,11 +23,15 @@ struct FaultDetailView: View {
     @State private var isUpdatingStatus = false
     @State private var isResolving = false
     @State private var selectedPhotoIndex = 0
+    @State private var nearbyGarages: [NominatimResult] = []
+    @State private var isLoadingGarages = false
 
     @State private var vehicleRegistration = "Unknown Vehicle"
     @State private var driverDisplayName = "Driver"
 
     @State private var errorText = ""
+
+    private let nominatimService = NominatimService.shared
 
     var body: some View {
         ScrollView {
@@ -34,7 +39,7 @@ struct FaultDetailView: View {
                 dangerBanner
                 descriptionCard
                 photoCard
-                mapPlaceholderCard
+                mapSection
                 statusCard
 
                 if !errorText.isEmpty {
@@ -70,6 +75,7 @@ struct FaultDetailView: View {
         .task {
             hydrateInitialState()
             await loadMetaDetails()
+            await loadNearbyGarages()
         }
         .onChange(of: photoReferences.count) { _, newCount in
             if newCount == 0 {
@@ -191,33 +197,55 @@ struct FaultDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private var mapPlaceholderCard: some View {
+    private var mapSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Location Map")
-                .font(.headline)
-
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.systemGray6))
-                .frame(height: 158)
-                .overlay {
-                    VStack(spacing: 8) {
-                        Image(systemName: "map")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                        Text("MapKit view will be added in Part 8")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-            Text(String(format: "Coordinates: %.6f, %.6f", fault.latitude, fault.longitude))
-                .font(.caption)
+            Text("DRIVER LOCATION & NEAREST GARAGES")
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .tracking(0.5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            let lat = fault.latitude
+            let lon = fault.longitude
+            let hasLocation = !(lat == 0 && lon == 0)
+
+            if !hasLocation {
+                HStack(spacing: 10) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundStyle(Color.navyPrimary)
+
+                    Text("Driver location was not captured for this fault.")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.navyPrimary)
+
+                    Spacer()
+                }
+                .padding(12)
+                .background(Color(hex: "E8F0FB"))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else if isLoadingGarages {
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Finding nearest garages…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+            } else {
+                FaultMapView(
+                    driverCoordinate: CLLocationCoordinate2D(
+                        latitude: lat,
+                        longitude: lon
+                    ),
+                    garages: nearbyGarages
+                )
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.white)
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
     }
 
     private var statusCard: some View {
@@ -313,6 +341,16 @@ struct FaultDetailView: View {
     private func loadMetaDetails() async {
         vehicleRegistration = loadVehicleRegistration()
         driverDisplayName = await loadDriverName()
+    }
+
+    private func loadNearbyGarages() async {
+        let lat = fault.latitude
+        let lon = fault.longitude
+        guard !(lat == 0 && lon == 0) else { return }
+
+        isLoadingGarages = true
+        nearbyGarages = (try? await nominatimService.findNearestGarages(latitude: lat, longitude: lon)) ?? []
+        isLoadingGarages = false
     }
 
     private func loadVehicleRegistration() -> String {
