@@ -22,6 +22,7 @@ struct DocumentVaultView: View {
     @State private var documentsByType: [String: DocumentEntity] = [:]
 
     @State private var activeDocType: String?
+    @State private var showPhotosPicker = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var pendingImage: UIImage?
     @State private var pendingExpiryDate = Date()
@@ -57,19 +58,16 @@ struct DocumentVaultView: View {
             }
             .navigationTitle("Document Vault")
             .navigationBarTitleDisplayMode(.inline)
+            // Use a dedicated Bool flag — avoids conflicts with showConfirmSheet.
             .photosPicker(
-                isPresented: Binding(
-                    get: { activeDocType != nil && !showConfirmSheet },
-                    set: { presented in
-                        if !presented {
-                            selectedPhotoItem = nil
-                        }
-                    }
-                ),
+                isPresented: $showPhotosPicker,
                 selection: $selectedPhotoItem,
                 matching: .images
             )
             .onChange(of: selectedPhotoItem) { _, item in
+                // Dismiss picker immediately before processing.
+                showPhotosPicker = false
+                guard let item else { return }
                 Task {
                     await processPickedPhoto(item)
                 }
@@ -129,6 +127,7 @@ struct DocumentVaultView: View {
             Button {
                 activeDocType = type
                 infoMessage = ""
+                showPhotosPicker = true
             } label: {
                 Text(document == nil ? "Scan & Upload" : "Replace Document")
                     .font(.caption.weight(.semibold))
@@ -178,26 +177,31 @@ struct DocumentVaultView: View {
     }
 
     @MainActor
-    private func processPickedPhoto(_ item: PhotosPickerItem?) async {
-        guard let item,
-              let data = try? await item.loadTransferable(type: Data.self),
+    private func processPickedPhoto(_ item: PhotosPickerItem) async {
+        // Load raw data on background thread to avoid blocking the main actor.
+        guard let data = try? await item.loadTransferable(type: Data.self),
               let image = UIImage(data: data) else {
             activeDocType = nil
+            selectedPhotoItem = nil
             return
         }
 
         pendingImage = image
         pendingExpiryDate = Date()
 
-        do {
-            let lines = try await OCRService.shared.recognizeText(in: image)
-            if let detected = OCRService.shared.extractExpiryDate(from: lines) {
-                pendingExpiryDate = detected
-            }
-        } catch {
-            // Ignore OCR failures and allow manual expiry selection.
+        // Run Vision OCR off the main thread — handler.perform() is synchronous
+        // and would freeze the UI if called on MainActor.
+        let recognizedLines: [String] = await Task.detached(priority: .userInitiated) {
+            (try? await OCRService.shared.recognizeText(in: image)) ?? []
+        }.value
+
+        if let detected = OCRService.shared.extractExpiryDate(from: recognizedLines) {
+            pendingExpiryDate = detected
         }
 
+        // Small delay ensures the photo picker has fully dismissed before
+        // presenting the confirm sheet, preventing SwiftUI sheet conflicts.
+        try? await Task.sleep(nanoseconds: 300_000_000)
         showConfirmSheet = true
     }
 
@@ -309,6 +313,7 @@ struct DocumentVaultView: View {
 
     private func resetPendingState() {
         showConfirmSheet = false
+        showPhotosPicker = false
         activeDocType = nil
         selectedPhotoItem = nil
         pendingImage = nil
