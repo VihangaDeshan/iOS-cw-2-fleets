@@ -109,6 +109,10 @@ struct FaultMapView: View {
                                             UIApplication.shared.open(url)
                                         }
                                     }
+                            } else {
+                                Label("Phone not listed", systemImage: "phone.slash")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
 
