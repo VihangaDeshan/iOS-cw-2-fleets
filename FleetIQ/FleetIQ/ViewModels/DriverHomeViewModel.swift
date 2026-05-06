@@ -21,6 +21,10 @@ final class DriverHomeViewModel: ObservableObject {
     @Published var todayKmDriven: Double = 0
     @Published var isLoadingVehicle: Bool = false
     @Published var todayActivityItems: [DriverActivityItem] = []
+    
+    @Published var expiredDocsSummary: [String] = []
+    @Published var showExpiredDocsAlert: Bool = false
+    private var hasCheckedExpiredDocs = false
 
     // MARK: - Private Properties
     private let context = PersistenceController.shared.viewContext
@@ -137,7 +141,57 @@ final class DriverHomeViewModel: ObservableObject {
                 self.applyVehicleSnapshot(data: data, vehicleId: vehicleId)
                 self.loadAssignedVehicleFromCoreData(vehicleId: vehicleId)
                 self.loadTodayStats(vehicleId: vehicleId, driverId: driverId)
+                self.triggerNotifications()
+                self.checkAndAlertExpiredDocuments()
             }
+        }
+    }
+
+    private func triggerNotifications() {
+        guard let vehicle = assignedVehicle else { return }
+        let reg = vehicle.registration ?? "Your Vehicle"
+        
+        if let ins = vehicle.insuranceExpiry {
+            NotificationService.shared.rescheduleExpiryIfNeeded(
+                vehicleRegistration: reg,
+                documentType: "Insurance",
+                expiryDate: ins,
+                vehicleId: vehicle.id ?? UUID()
+            )
+        }
+        
+        if let lic = vehicle.licenceExpiry {
+            NotificationService.shared.rescheduleExpiryIfNeeded(
+                vehicleRegistration: reg,
+                documentType: "Revenue Licence",
+                expiryDate: lic,
+                vehicleId: vehicle.id ?? UUID()
+            )
+        }
+    }
+
+    private func checkAndAlertExpiredDocuments() {
+        guard let vehicle = assignedVehicle, !hasCheckedExpiredDocs else { return }
+        hasCheckedExpiredDocs = true
+        var summary: [String] = []
+        
+        if let ins = vehicle.insuranceExpiry {
+            let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: ins)).day ?? 0
+            if days <= 30 {
+                summary.append("Insurance (\(days < 0 ? "Expired" : "Expires in \(days) days"))")
+            }
+        }
+        
+        if let lic = vehicle.licenceExpiry {
+            let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: lic)).day ?? 0
+            if days <= 30 {
+                summary.append("Revenue Licence (\(days < 0 ? "Expired" : "Expires in \(days) days"))")
+            }
+        }
+        
+        if !summary.isEmpty {
+            self.expiredDocsSummary = summary
+            self.showExpiredDocsAlert = true
         }
     }
 

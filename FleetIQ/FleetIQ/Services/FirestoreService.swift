@@ -407,6 +407,28 @@ class FirestoreService {
         }
     }
 
+    /// Fetches service records for a single vehicle, used to re-populate CoreData after reinstall.
+    func fetchServiceRecords(
+        fleetId: String,
+        vehicleId: String
+    ) async throws -> [QueryDocumentSnapshot] {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[QueryDocumentSnapshot], Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("serviceRecords")
+                .whereField("vehicleId", isEqualTo: vehicleId)
+                .order(by: "date", descending: true)
+                .getDocuments { snapshot, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: snapshot?.documents ?? [])
+                }
+        }
+    }
+
     // MARK: - Fuel Logs
 
     /// Saves a fuel-log document to fleets/{fleetId}/fuelLogs/{logId}.
@@ -433,6 +455,27 @@ class FirestoreService {
                     }
 
                     continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Fetches fuel logs for a single vehicle, used to re-populate CoreData after reinstall.
+    func fetchFuelLogs(
+        fleetId: String,
+        vehicleId: String
+    ) async throws -> [QueryDocumentSnapshot] {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[QueryDocumentSnapshot], Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("fuelLogs")
+                .whereField("vehicleId", isEqualTo: vehicleId)
+                .order(by: "date", descending: true)
+                .getDocuments { snapshot, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                    continuation.resume(returning: snapshot?.documents ?? [])
                 }
         }
     }
@@ -533,6 +576,27 @@ class FirestoreService {
                     }
 
                     continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Fetches trip logs for a single vehicle, used to re-populate CoreData after reinstall.
+    func fetchTripLogs(
+        fleetId: String,
+        vehicleId: String
+    ) async throws -> [QueryDocumentSnapshot] {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[QueryDocumentSnapshot], Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("tripLogs")
+                .whereField("vehicleId", isEqualTo: vehicleId)
+                .order(by: "date", descending: true)
+                .getDocuments { snapshot, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                    continuation.resume(returning: snapshot?.documents ?? [])
                 }
         }
     }
@@ -805,6 +869,28 @@ class FirestoreService {
                     }
 
                     continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Fetches all document-vault items for a vehicle from Firestore.
+    /// Used to re-populate CoreData after a fresh install.
+    func fetchVehicleDocuments(
+        fleetId: String,
+        vehicleId: String
+    ) async throws -> [[String: Any]] {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[[String: Any]], Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("documents")
+                .whereField("vehicleId", isEqualTo: vehicleId)
+                .getDocuments { snapshot, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                    let docs = snapshot?.documents.map { $0.data() } ?? []
+                    continuation.resume(returning: docs)
                 }
         }
     }

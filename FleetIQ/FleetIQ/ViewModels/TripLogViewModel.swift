@@ -120,7 +120,30 @@ final class TripLogViewModel: ObservableObject {
         isSaving = true
         defer { isSaving = false }
 
-        // Persist locally first so the realtime listener upsert does not create a duplicate
+        // Attempt cloud sync first
+        do {
+            let payload: [String: Any] = [
+                "id": tripId.uuidString,
+                "vehicleId": vehicleId.uuidString,
+                "driverId": normalizedDriverId,
+                "purpose": normalizedPurpose,
+                "destination": normalizedDestination,
+                "startMileage": startMileage,
+                "endMileage": endMileage,
+                "distanceKm": distanceKm,
+                "date": Timestamp(date: date)
+            ]
+
+            try await firestoreService.saveTripLog(
+                payload,
+                fleetId: normalizedFleetId,
+                logId: tripId.uuidString
+            )
+        } catch {
+            errorMessage = "Cloud sync failed for trip log."
+            return false
+        }
+
         let trip = TripLogEntity(context: context)
         trip.id = tripId
         trip.vehicleId = vehicleId
@@ -141,32 +164,6 @@ final class TripLogViewModel: ObservableObject {
         } catch {
             errorMessage = "Could not save trip log locally."
             return false
-        }
-
-        // Attempt cloud sync but keep local record if it fails. Using same id prevents duplicates.
-        do {
-            let payload: [String: Any] = [
-                "id": tripId.uuidString,
-                "vehicleId": vehicleId.uuidString,
-                "driverId": normalizedDriverId,
-                "purpose": normalizedPurpose,
-                "destination": normalizedDestination,
-                "startMileage": startMileage,
-                "endMileage": endMileage,
-                "distanceKm": distanceKm,
-                "date": Timestamp(date: date)
-            ]
-
-            try await firestoreService.saveTripLog(
-                payload,
-                fleetId: normalizedFleetId,
-                logId: tripId.uuidString
-            )
-        } catch {
-            errorMessage = "Cloud sync failed for trip log; saved locally."
-            // still return true because local save succeeded
-            loadTrips(for: vehicleId)
-            return true
         }
 
         loadTrips(for: vehicleId)

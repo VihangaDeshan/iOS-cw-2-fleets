@@ -30,6 +30,9 @@ struct DocumentVaultView: View {
 
     @State private var isSaving = false
     @State private var infoMessage = ""
+    @State private var showExpiredAlert = false
+    @State private var expiredDocumentNames: [String] = []
+    @State private var hasShownExpiredAlert = false
 
     private let firestoreService = FirestoreService.shared
 
@@ -82,7 +85,15 @@ struct DocumentVaultView: View {
                     }
                 }
             }
-            .onAppear(perform: loadDocuments)
+            .onAppear {
+                loadDocuments()
+                syncFromFirestore()
+            }
+            .alert("Expired Documents", isPresented: $showExpiredAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("The following documents have EXPIRED and require immediate renewal:\n\n\(expiredDocumentNames.joined(separator: "\n"))")
+            }
             .disabled(isSaving)
         }
     }
@@ -274,33 +285,6 @@ struct DocumentVaultView: View {
 
             let photoURL = try await firestoreService.uploadPhoto(image, path: storagePath)
 
-            let entity = documentsByType[docType] ?? DocumentEntity(context: context)
-            let savedDocumentId = entity.id ?? UUID()
-            entity.id = savedDocumentId
-            entity.vehicleId = vehicleId
-            entity.type = docType
-            entity.expiryDate = pendingExpiryDate
-            entity.photoURL = photoURL
-
-            // Keep existing vehicle-level expiry fields in sync where available.
-            if docType == "insurance" {
-                vehicle.insuranceExpiry = pendingExpiryDate
-                try await firestoreService.updateVehicle(
-                    fleetId: authViewModel.fleetId,
-                    vehicleId: vehicleId.uuidString,
-                    data: ["insuranceExpiry": Timestamp(date: pendingExpiryDate)]
-                )
-            } else if docType == "licence" {
-                vehicle.licenceExpiry = pendingExpiryDate
-                try await firestoreService.updateVehicle(
-                    fleetId: authViewModel.fleetId,
-                    vehicleId: vehicleId.uuidString,
-                    data: ["licenceExpiry": Timestamp(date: pendingExpiryDate)]
-                )
-            }
-
-            try context.save()
-
             let firestorePayload: [String: Any] = [
                 "id": docId,
                 "vehicleId": vehicleId.uuidString,
@@ -315,6 +299,33 @@ struct DocumentVaultView: View {
                 fleetId: authViewModel.fleetId,
                 docId: docId
             )
+
+            let entity = documentsByType[docType] ?? DocumentEntity(context: context)
+            let savedDocumentId = entity.id ?? UUID()
+            entity.id = savedDocumentId
+            entity.vehicleId = vehicleId
+            entity.type = docType
+            entity.expiryDate = pendingExpiryDate
+            entity.photoURL = photoURL
+
+            // Keep existing vehicle-level expiry fields in sync where available.
+            if docType == "insurance" {
+                vehicle.insuranceExpiry = pendingExpiryDate
+                try? await firestoreService.updateVehicle(
+                    fleetId: authViewModel.fleetId,
+                    vehicleId: vehicleId.uuidString,
+                    data: ["insuranceExpiry": Timestamp(date: pendingExpiryDate)]
+                )
+            } else if docType == "licence" {
+                vehicle.licenceExpiry = pendingExpiryDate
+                try? await firestoreService.updateVehicle(
+                    fleetId: authViewModel.fleetId,
+                    vehicleId: vehicleId.uuidString,
+                    data: ["licenceExpiry": Timestamp(date: pendingExpiryDate)]
+                )
+            }
+
+            try context.save()
 
             NotificationService.shared.scheduleAllExpiryWarnings(
                 vehicleRegistration: vehicle.registration ?? "",
@@ -391,6 +402,61 @@ struct DocumentVaultView: View {
         isSaving = false
     }
 
+    @MainActor
+    private func syncFromFirestore() {
+        guard let vehicleId = vehicle.id else { return }
+        let fleetId = authViewModel.fleetId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fleetId.isEmpty else { return }
+
+        Task { @MainActor in
+            do {
+                let docs = try await firestoreService.fetchVehicleDocuments(
+                    fleetId: fleetId,
+                    vehicleId: vehicleId.uuidString)
+
+                guard !docs.isEmpty else { return }
+
+                for data in docs {
+                    guard let typeStr = data["type"] as? String,
+                          !typeStr.isEmpty else { continue }
+
+                    let request = DocumentEntity.fetchRequest()
+                    request.predicate = NSPredicate(
+                        format: "vehicleId == %@ AND type ==[c] %@",
+                        vehicleId as CVarArg, typeStr)
+                    request.fetchLimit = 1
+
+                    let entity = (try? context.fetch(request).first)
+                        ?? DocumentEntity(context: context)
+                    if entity.id == nil { entity.id = UUID() }
+                    entity.vehicleId = vehicleId
+                    entity.type = typeStr
+
+                    if let ts = data["expiryDate"] as? Timestamp {
+                        entity.expiryDate = ts.dateValue()
+                    }
+                    if let url = data["photoURL"] as? String, !url.isEmpty {
+                        entity.photoURL = url
+                    }
+
+                    if let expiry = entity.expiryDate {
+                        NotificationService.shared.rescheduleExpiryIfNeeded(
+                            vehicleRegistration: vehicle.registration ?? "Vehicle",
+                            documentType: typeStr.capitalized,
+                            expiryDate: expiry,
+                            vehicleId: vehicleId)
+                    }
+                }
+
+                try context.save()
+                loadDocuments()
+            } catch {
+                infoMessage = "Sync failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func loadDocuments() {
         guard let vehicleId = vehicle.id else {
             documentsByType = [:]
@@ -403,12 +469,37 @@ struct DocumentVaultView: View {
         do {
             let docs = try context.fetch(request)
             var map: [String: DocumentEntity] = [:]
+            var expired: [String] = []
+            let reg = vehicle.registration ?? "Vehicle"
+
             for doc in docs {
-                if let type = doc.type {
-                    map[type.lowercased()] = doc
+                guard let type = doc.type else { continue }
+                map[type.lowercased()] = doc
+
+                if let expiry = doc.expiryDate {
+                    NotificationService.shared.rescheduleExpiryIfNeeded(
+                        vehicleRegistration: reg,
+                        documentType: type.capitalized,
+                        expiryDate: expiry,
+                        vehicleId: vehicleId)
+
+                    let days = Calendar.current.dateComponents(
+                        [.day],
+                        from: Calendar.current.startOfDay(for: Date()),
+                        to: Calendar.current.startOfDay(for: expiry)).day ?? 0
+                    if days < 0 {
+                        expired.append(type.capitalized)
+                    }
                 }
             }
+
             documentsByType = map
+
+            if !expired.isEmpty && !hasShownExpiredAlert {
+                hasShownExpiredAlert = true
+                expiredDocumentNames = expired
+                showExpiredAlert = true
+            }
         } catch {
             documentsByType = [:]
         }

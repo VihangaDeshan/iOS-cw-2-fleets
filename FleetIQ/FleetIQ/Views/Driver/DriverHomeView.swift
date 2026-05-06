@@ -43,6 +43,11 @@ struct DriverHomeView: View {
             } message: {
                 Text("Ask your manager to assign a vehicle before creating trip logs.")
             }
+            .alert("Document Warning ⚠️", isPresented: $viewModel.showExpiredDocsAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Your assigned vehicle has documents requiring attention:\n\n\(viewModel.expiredDocsSummary.joined(separator: "\n"))\n\nPlease notify your manager.")
+            }
         }
         .task(id: startKey) {
             viewModel.start(authViewModel: authViewModel)
@@ -67,7 +72,11 @@ struct DriverHomeView: View {
             }
         }
         .sheet(isPresented: $showDriverNotifications) {
-            DriverNotificationsView(faultVM: driverFaultVM)
+            DriverNotificationsView(
+                faultVM: driverFaultVM,
+                fleetId: authViewModel.fleetId,
+                expiredDocsSummary: viewModel.expiredDocsSummary
+            )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -96,11 +105,13 @@ struct DriverHomeView: View {
 
                     let unresolved = driverFaultVM.myFaults.filter {
                         let s = ($0.status ?? "open").lowercased()
-                        return s != "open" && s != "resolved"
+                        return s != "open" && s != "resolved" && s != "acknowledged"
                     }.count
+                    
+                    let badgeCount = unresolved + viewModel.expiredDocsSummary.count
 
-                    if unresolved > 0 {
-                        Text("\(min(unresolved, 9))")
+                    if badgeCount > 0 {
+                        Text("\(min(badgeCount, 9))")
                             .font(.caption2.weight(.bold))
                             .foregroundColor(.white)
                             .padding(4)
@@ -436,21 +447,44 @@ struct DriverHomeView: View {
 // MARK: - Driver Notifications View
 private struct DriverNotificationsView: View {
     @ObservedObject var faultVM: FaultViewModel
+    let fleetId: String
+    let expiredDocsSummary: [String]
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
-                if faultVM.myFaults.isEmpty {
-                    ContentUnavailableView(
-                        "No Notifications",
-                        systemImage: "bell.slash",
-                        description: Text(
-                            "Fault status updates from your manager appear here.")
-                    )
-                } else {
-                    ForEach(faultVM.myFaults.prefix(20), id: \.id) { fault in
-                        notificationRow(for: fault)
+                if !expiredDocsSummary.isEmpty {
+                    Section("Expiring Documents") {
+                        ForEach(expiredDocsSummary, id: \.self) { doc in
+                            HStack(spacing: 12) {
+                                Image(systemName: "doc.fill.badge.exclamationmark")
+                                    .foregroundColor(doc.contains("Expired") ? .statusOverdue : .statusDueSoon)
+                                    .font(.title3)
+                                    .frame(width: 32, height: 32)
+                                    .background((doc.contains("Expired") ? Color.statusOverdue : Color.statusDueSoon).opacity(0.12))
+                                    .clipShape(Circle())
+                                
+                                Text(doc)
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+
+                Section(faultVM.myFaults.isEmpty ? "" : "Fault Updates") {
+                    if faultVM.myFaults.isEmpty {
+                        ContentUnavailableView(
+                            "No Fault Notifications",
+                            systemImage: "bell.slash",
+                            description: Text(
+                                "Fault status updates from your manager appear here.")
+                        )
+                    } else {
+                        ForEach(faultVM.myFaults.prefix(20), id: \.id) { fault in
+                            notificationRow(for: fault)
+                        }
                     }
                 }
             }
@@ -458,9 +492,36 @@ private struct DriverNotificationsView: View {
             .navigationTitle("Notifications")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if faultVM.myFaults.contains(where: {
+                        let s = ($0.status ?? "open").lowercased()
+                        return s != "open" && s != "resolved" && s != "acknowledged"
+                    }) {
+                        Button("Mark All as Read") {
+                            markAllAsRead()
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
+            }
+        }
+    }
+
+    private func markAllAsRead() {
+        let unreadFaults = faultVM.myFaults.filter { fault in
+            let s = (fault.status ?? "open").lowercased()
+            return s != "open" && s != "resolved" && s != "acknowledged"
+        }
+        
+        for fault in unreadFaults {
+            Task {
+                try? await faultVM.updateStatus(
+                    fault: fault,
+                    status: "acknowledged",
+                    fleetId: fleetId
+                )
             }
         }
     }

@@ -132,46 +132,32 @@ class FleetViewModel: ObservableObject {
         let normalizedMake = make.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let vehicle = VehicleEntity(context: context)
-        vehicle.id = newId
-        vehicle.registration = normalizedRegistration
-        vehicle.make = normalizedMake
-        vehicle.model = normalizedModel
-        vehicle.year = year
-        vehicle.fuelType = fuelType
-        vehicle.currentMileage = currentMileage
-        vehicle.createdAt = createdAt
-        vehicle.assignedDriverId = assignedDriverName
-        vehicle.insuranceExpiry = insuranceExpiry
-        vehicle.licenceExpiry = licenceExpiry
+        var payload: [String: Any] = [
+            "id": newId.uuidString,
+            "registration": normalizedRegistration,
+            "make": normalizedMake,
+            "model": normalizedModel,
+            "year": Int(year),
+            "fuelType": fuelType,
+            "currentMileage": currentMileage,
+            "createdAt": Timestamp(date: createdAt),
+            "assignedDriverId": assignedDriverName ?? ""
+        ]
+
+        if let insuranceExpiry {
+            payload["insuranceExpiry"] = Timestamp(date: insuranceExpiry)
+        } else {
+            payload["insuranceExpiry"] = NSNull()
+        }
+
+        if let licenceExpiry {
+            payload["licenceExpiry"] = Timestamp(date: licenceExpiry)
+        } else {
+            payload["licenceExpiry"] = NSNull()
+        }
 
         do {
-            try context.save()
-
-            var payload: [String: Any] = [
-                "id": newId.uuidString,
-                "registration": normalizedRegistration,
-                "make": normalizedMake,
-                "model": normalizedModel,
-                "year": Int(year),
-                "fuelType": fuelType,
-                "currentMileage": currentMileage,
-                "createdAt": Timestamp(date: createdAt),
-                "assignedDriverId": assignedDriverName ?? ""
-            ]
-
-            if let insuranceExpiry {
-                payload["insuranceExpiry"] = Timestamp(date: insuranceExpiry)
-            } else {
-                payload["insuranceExpiry"] = NSNull()
-            }
-
-            if let licenceExpiry {
-                payload["licenceExpiry"] = Timestamp(date: licenceExpiry)
-            } else {
-                payload["licenceExpiry"] = NSNull()
-            }
-
+            // Attempt cloud save FIRST to ensure synchronization
             try await firestoreService.saveVehicle(payload, fleetId: fleetId, vehicleId: newId.uuidString)
 
             if let driverUserId = assignedDriverUserId, !driverUserId.isEmpty {
@@ -185,17 +171,31 @@ class FleetViewModel: ObservableObject {
                     vehicleId: newId.uuidString
                 )
             }
-            // Return the created vehicle id on success
+            
+            // Only IF cloud save succeeds, save to CoreData locally
+            let vehicle = VehicleEntity(context: context)
+            vehicle.id = newId
+            vehicle.registration = normalizedRegistration
+            vehicle.make = normalizedMake
+            vehicle.model = normalizedModel
+            vehicle.year = year
+            vehicle.fuelType = fuelType
+            vehicle.currentMileage = currentMileage
+            vehicle.createdAt = createdAt
+            vehicle.assignedDriverId = assignedDriverName
+            vehicle.insuranceExpiry = insuranceExpiry
+            vehicle.licenceExpiry = licenceExpiry
+            
+            try context.save()
             fetchFromCoreData()
             isLoading = false
             return newId.uuidString
+            
         } catch {
             errorMessage = error.localizedDescription
+            isLoading = false
+            return nil
         }
-        fetchFromCoreData()
-
-        isLoading = false
-        return nil
     }
 
     // MARK: - Delete

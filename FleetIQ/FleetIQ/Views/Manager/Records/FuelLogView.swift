@@ -349,6 +349,12 @@ private struct AddFuelLogSheet: View {
             return
         }
 
+        let fleetId = authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fleetId.isEmpty else {
+            errorText = "Fleet ID is missing — cannot save to cloud. Please sign out and back in."
+            return
+        }
+
         guard let mileageValue = Double(mileage.replacingOccurrences(of: ",", with: "")),
               let litresValue = Double(litres.replacingOccurrences(of: ",", with: "")),
               let totalValue = Double(totalCost.replacingOccurrences(of: ",", with: "")),
@@ -364,7 +370,33 @@ private struct AddFuelLogSheet: View {
 
         isSaving = true
 
-        // Persist locally first to avoid duplicates when the realtime listener triggers
+        let costPerLitre = totalValue / litresValue
+
+        // Sync to Firestore first
+        do {
+            let payload: [String: Any] = [
+                "id": logId.uuidString,
+                "vehicleId": vehicleId.uuidString,
+                "date": Timestamp(date: date),
+                "mileage": mileageValue,
+                "litres": litresValue,
+                "totalCostLKR": totalValue,
+                "costPerLitre": costPerLitre,
+                "kmPerLitre": efficiency
+            ]
+
+            try await firestoreService.saveFuelLog(
+                payload,
+                fleetId: fleetId,
+                logId: logId.uuidString
+            )
+        } catch {
+            errorText = "Firebase sync failed: \(error.localizedDescription). Please try again."
+            isSaving = false
+            return
+        }
+
+        // Save to CoreData
         let log = FuelLogEntity(context: context)
         log.id = logId
         log.vehicleId = vehicleId
@@ -372,7 +404,7 @@ private struct AddFuelLogSheet: View {
         log.mileage = mileageValue
         log.litres = litresValue
         log.totalCostLKR = totalValue
-        log.costPerLitre = totalValue / litresValue
+        log.costPerLitre = costPerLitre
         log.kmPerLitre = efficiency
 
         vehicle.currentMileage = max(vehicle.currentMileage, mileageValue)
@@ -385,34 +417,8 @@ private struct AddFuelLogSheet: View {
             return
         }
 
-        // Attempt cloud sync but keep local record if it fails
-        do {
-            let payload: [String: Any] = [
-                "id": logId.uuidString,
-                "vehicleId": vehicleId.uuidString,
-                "date": date,
-                "mileage": mileageValue,
-                "litres": litresValue,
-                "totalCostLKR": totalValue,
-                "costPerLitre": totalValue / litresValue,
-                "kmPerLitre": efficiency
-            ]
-
-            try await firestoreService.saveFuelLog(
-                payload,
-                fleetId: authViewModel.fleetId,
-                logId: logId.uuidString
-            )
-        } catch {
-            errorText = "Cloud sync failed for fuel log; saved locally."
-            isSaving = false
-            onSaved()
-            dismiss()
-            return
-        }
-
-        onSaved()
         isSaving = false
+        onSaved()
         dismiss()
     }
 

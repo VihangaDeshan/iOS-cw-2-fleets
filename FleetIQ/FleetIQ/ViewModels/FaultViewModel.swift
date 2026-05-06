@@ -143,7 +143,14 @@ final class FaultViewModel: ObservableObject {
             payload["photoURLs"] = photoReferences
         }
 
-        // 4) Save locally BEFORE attempting cloud save to avoid duplicates
+        // 4) Attempt cloud save FIRST to ensure synchronization
+        try await firestoreService.saveFaultReport(
+            payload,
+            fleetId: normalizedFleetId,
+            faultId: faultUUID.uuidString
+        )
+
+        // 5) If cloud save succeeded, save locally
         let localFault = upsertFaultEntity(with: faultUUID)
         localFault.vehicleId = vehicleUUID
         localFault.driverId = normalizedDriverId
@@ -161,25 +168,12 @@ final class FaultViewModel: ObservableObject {
 
         do {
             try context.save()
+            
+            // Insert into in-memory lists for immediate UI feedback
+            myFaults.insert(localFault, at: 0)
+            recalculateOpenFaultCount()
         } catch {
-            // If local save fails, propagate as before
             throw NSError(domain: "FaultViewModel", code: -30, userInfo: [NSLocalizedDescriptionKey: "Failed to save fault locally."])
-        }
-
-        // Insert into in-memory lists for immediate UI feedback
-        myFaults.insert(localFault, at: 0)
-        recalculateOpenFaultCount()
-
-        // 5) Attempt cloud save; if it fails we keep the local record and report error to caller
-        do {
-            try await firestoreService.saveFaultReport(
-                payload,
-                fleetId: normalizedFleetId,
-                faultId: faultUUID.uuidString
-            )
-        } catch {
-            // leave local record intact; bubble error so callers can inform the user
-            throw error
         }
 
         return faultUUID
@@ -321,20 +315,12 @@ final class FaultViewModel: ObservableObject {
                 }
             }
         case .driver:
-            // Capture previous statuses before replacing
-            var prevStatuses: [UUID: String] = [:]
-            for fault in myFaults {
-                if let id = fault.id {
-                    prevStatuses[id] = fault.status ?? ""
-                }
-            }
             myFaults = sorted
             // Fire notification for any status that changed
             for fault in sorted {
                 guard let faultId = fault.id else { continue }
                 notifyDriverIfStatusChanged(
                     faultId: faultId,
-                    previousStatus: prevStatuses[faultId] ?? "",
                     newStatus: fault.status ?? "",
                     description: fault.descriptionText ?? "")
             }
@@ -536,15 +522,22 @@ final class FaultViewModel: ObservableObject {
 
     private func notifyDriverIfStatusChanged(
         faultId: UUID,
-        previousStatus: String,
         newStatus: String,
         description: String
     ) {
-        let current  = newStatus
-            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let previous = previousStatus
-            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard current != previous, !current.isEmpty else { return }
+        let current = newStatus.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !current.isEmpty else { return }
+
+        let key = "notified_status_\(faultId.uuidString)"
+        let previous = UserDefaults.standard.string(forKey: key) ?? ""
+
+        guard current != previous else { return }
+        
+        // Save the new status so we don't notify again for this state
+        UserDefaults.standard.set(current, forKey: key)
+
+        // Don't notify for the initial 'open' state when the driver first submits it
+        if previous.isEmpty && current == "open" { return }
 
         NotificationService.shared.sendFaultStatusUpdate(
             newStatus: current,

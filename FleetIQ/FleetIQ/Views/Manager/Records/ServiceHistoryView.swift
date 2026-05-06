@@ -115,6 +115,11 @@ struct ServiceHistoryView: View {
         .onAppear {
             if let id = vehicle.id {
                 viewModel.loadRecords(for: id)
+                Task {
+                    await viewModel.syncRecords(
+                        vehicleId: id,
+                        fleetId: authViewModel.fleetId)
+                }
             }
         }
     }

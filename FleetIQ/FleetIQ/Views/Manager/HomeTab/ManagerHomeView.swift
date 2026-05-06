@@ -24,6 +24,10 @@ struct ManagerHomeView: View {
     @State private var showUserProfile = false
     @State private var showNotifications = false
     @State private var selectedAlertVehicle: VehicleEntity? = nil
+    @State private var hasShownWelcome = false
+    @State private var showExpiredDocsAlert = false
+    @State private var expiredDocsSummary: [String] = []
+    @State private var hasCheckedExpiredDocs = false
 
     @State private var heroPage = 0
     @State private var monthlySpend: Double = 0
@@ -147,6 +151,15 @@ struct ManagerHomeView: View {
             }
             .onAppear {
                 loadHomeMetrics()
+                if !hasShownWelcome {
+                    hasShownWelcome = true
+                    NotificationService.shared.sendManagerWelcome(name: authViewModel.currentUserName)
+                }
+            }
+            .alert("Expired Documents ⚠️", isPresented: $showExpiredDocsAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("The following documents require immediate renewal:\n\n\(expiredDocsSummary.joined(separator: "\n"))")
             }
             .onChange(of: fleetViewModel.vehicles.count) { _, _ in
                 loadHomeMetrics()
@@ -917,8 +930,98 @@ struct ManagerHomeView: View {
             return days >= 0 && days <= 30
         }.count
 
+        // Reschedule or fire expiry push notifications for all vehicle documents.
+        for vehicle in fleetViewModel.vehicles {
+            guard let vehicleId = vehicle.id else { continue }
+            let reg = vehicle.registration ?? "Vehicle"
+            if let insuranceExpiry = vehicle.insuranceExpiry {
+                NotificationService.shared.rescheduleExpiryIfNeeded(
+                    vehicleRegistration: reg,
+                    documentType: "Insurance",
+                    expiryDate: insuranceExpiry,
+                    vehicleId: vehicleId)
+            }
+            if let licenceExpiry = vehicle.licenceExpiry {
+                NotificationService.shared.rescheduleExpiryIfNeeded(
+                    vehicleRegistration: reg,
+                    documentType: "Revenue Licence",
+                    expiryDate: licenceExpiry,
+                    vehicleId: vehicleId)
+            }
+        }
+
+        // Also scan DocumentEntity so all document types (emission, insurance, licence)
+        // fire push notifications on app open even if VehicleEntity expiry fields are nil.
+        let allDocReq = DocumentEntity.fetchRequest()
+        if let allDocs = try? context.fetch(allDocReq) {
+            for doc in allDocs {
+                guard let type = doc.type,
+                      let expiry = doc.expiryDate,
+                      let vehicleId = doc.vehicleId,
+                      let matchedVehicle = fleetViewModel.vehicles.first(where: { $0.id == vehicleId })
+                else { continue }
+                let reg = matchedVehicle.registration ?? "Vehicle"
+                NotificationService.shared.rescheduleExpiryIfNeeded(
+                    vehicleRegistration: reg,
+                    documentType: type.capitalized,
+                    expiryDate: expiry,
+                    vehicleId: vehicleId)
+            }
+        }
+
         rebuildNotifications(from: activeFaults)
-        loadTodayActivity()   // Bug 2: Load today's activity at end
+        loadTodayActivity()
+        checkAndAlertExpiredDocuments()
+    }
+
+    /// Checks vehicles' insurance and licence expiry dates and shows an in-app alert
+    /// once per session when any have already expired.
+    private func checkAndAlertExpiredDocuments() {
+        guard !hasCheckedExpiredDocs, !fleetViewModel.vehicles.isEmpty else { return }
+        hasCheckedExpiredDocs = true
+
+        var expired: [String] = []
+        let today = Calendar.current.startOfDay(for: Date())
+
+        for vehicle in fleetViewModel.vehicles {
+            let reg = vehicle.registration ?? "Vehicle"
+            if let expiry = vehicle.insuranceExpiry,
+               let days = Calendar.current.dateComponents([.day], from: today, to: Calendar.current.startOfDay(for: expiry)).day,
+               days < 0 {
+                expired.append("\(reg) — Insurance (expired \(abs(days))d ago)")
+            }
+            if let expiry = vehicle.licenceExpiry,
+               let days = Calendar.current.dateComponents([.day], from: today, to: Calendar.current.startOfDay(for: expiry)).day,
+               days < 0 {
+                expired.append("\(reg) — Revenue Licence (expired \(abs(days))d ago)")
+            }
+        }
+
+        // Also check DocumentEntity records in CoreData for emission and any other types.
+        let docRequest = DocumentEntity.fetchRequest()
+        if let docs = try? context.fetch(docRequest) {
+            for doc in docs {
+                guard let type = doc.type,
+                      let expiry = doc.expiryDate,
+                      let vehicleId = doc.vehicleId,
+                      let vehicle = fleetViewModel.vehicles.first(where: { $0.id == vehicleId }),
+                      let days = Calendar.current.dateComponents(
+                          [.day], from: today,
+                          to: Calendar.current.startOfDay(for: expiry)).day,
+                      days < 0 else { continue }
+
+                // Only add emission here (insurance/licence already covered from VehicleEntity above).
+                let typeLC = type.lowercased()
+                guard typeLC != "insurance" && typeLC != "licence" else { continue }
+                let reg = vehicle.registration ?? "Vehicle"
+                expired.append("\(reg) — \(type.capitalized) (expired \(abs(days))d ago)")
+            }
+        }
+
+        if !expired.isEmpty {
+            expiredDocsSummary = expired
+            showExpiredDocsAlert = true
+        }
     }
 
     // Bug 2: Load today's activity
@@ -986,28 +1089,62 @@ struct ManagerHomeView: View {
             )
         }
 
+        // Check insurance AND licence expiry for every vehicle (expired + upcoming 30 days).
         for vehicle in fleetViewModel.vehicles {
-            guard let expiry = vehicle.licenceExpiry else {
-                continue
+            let reg = vehicle.registration?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanReg = reg?.isEmpty == false ? reg! : "Vehicle"
+            let vid = vehicle.id?.uuidString ?? UUID().uuidString
+
+            if let expiry = vehicle.licenceExpiry {
+                let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+                if days <= 30 {
+                    items.append(expiryNotificationItem(
+                        id: "licence-\(vid)",
+                        reg: cleanReg,
+                        type: "Revenue Licence",
+                        days: days,
+                        expiry: expiry))
+                }
             }
 
-            let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
-            guard days >= 0 && days <= 30 else {
-                continue
+            if let expiry = vehicle.insuranceExpiry {
+                let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+                if days <= 30 {
+                    items.append(expiryNotificationItem(
+                        id: "insurance-\(vid)",
+                        reg: cleanReg,
+                        type: "Insurance",
+                        days: days,
+                        expiry: expiry))
+                }
             }
+        }
 
-            let registration = vehicle.registration?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cleanRegistration = (registration?.isEmpty == false) ? registration! : "Vehicle"
+        // Check DocumentEntity (e.g. emission test) expiry.
+        let docRequest = DocumentEntity.fetchRequest()
+        if let docs = try? context.fetch(docRequest) {
+            for doc in docs {
+                guard let type = doc.type,
+                      let expiry = doc.expiryDate,
+                      let vehicleId = doc.vehicleId,
+                      let matchedVehicle = fleetViewModel.vehicles.first(where: { $0.id == vehicleId })
+                else { continue }
 
-            items.append(
-                ManagerNotificationItem(
-                    id: "licence-\(vehicle.id?.uuidString ?? UUID().uuidString)",
-                    title: "Licence expiry: \(cleanRegistration)",
-                    subtitle: "Revenue licence expires in \(days) day(s).",
-                    date: expiry,
-                    level: days <= 7 ? .danger : .warning
-                )
-            )
+                let typeLC = type.lowercased()
+                guard typeLC != "insurance" && typeLC != "licence" else { continue }
+
+                let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+                guard days <= 30 else { continue }
+
+                let reg = matchedVehicle.registration ?? "Vehicle"
+                let docId = doc.id?.uuidString ?? UUID().uuidString
+                items.append(expiryNotificationItem(
+                    id: "doc-\(docId)",
+                    reg: reg,
+                    type: type.capitalized,
+                    days: days,
+                    expiry: expiry))
+            }
         }
 
         let readIds = readNotificationIDs
@@ -1023,6 +1160,43 @@ struct ManagerHomeView: View {
             .first(where: { !$0.isRead })?.subtitle
             ?? notifications.first?.subtitle
             ?? "No critical alerts right now."
+    }
+
+    private func expiryNotificationItem(
+        id: String,
+        reg: String,
+        type: String,
+        days: Int,
+        expiry: Date
+    ) -> ManagerNotificationItem {
+        let title: String
+        let subtitle: String
+        let level: ManagerNotificationItem.Level
+        let notifDate: Date
+
+        if days < 0 {
+            title = "EXPIRED: \(type) — \(reg)"
+            subtitle = "\(reg) \(type) EXPIRED \(abs(days)) day(s) ago! Renew immediately."
+            level = .danger
+            notifDate = Date()
+        } else if days == 0 {
+            title = "Expires TODAY: \(type) — \(reg)"
+            subtitle = "\(reg) \(type) expires TODAY. Renew immediately."
+            level = .danger
+            notifDate = expiry
+        } else if days <= 7 {
+            title = "URGENT: \(type) expiring — \(reg)"
+            subtitle = "\(reg) \(type) expires in \(days) day(s)."
+            level = .danger
+            notifDate = expiry
+        } else {
+            title = "\(type) expiry: \(reg)"
+            subtitle = "\(reg) \(type) expires in \(days) day(s). Renew to avoid fines."
+            level = .warning
+            notifDate = expiry
+        }
+
+        return ManagerNotificationItem(id: id, title: title, subtitle: subtitle, date: notifDate, level: level)
     }
 
     private func registrationForFault(_ fault: FaultReportEntity) -> String {

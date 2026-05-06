@@ -655,17 +655,6 @@ struct AddVehicleView: View {
                 let photoURL = try await firestoreService.uploadPhoto(image, path: storagePath)
 
                 guard let vehicleUUID = UUID(uuidString: vehicleId) else { return }
-                let context = PersistenceController.shared.viewContext
-                let entity = DocumentEntity(context: context)
-                let savedId = UUID()
-                entity.id = savedId
-                entity.vehicleId = vehicleUUID
-                entity.type = type
-                entity.expiryDate = expiry ?? Date()
-                entity.photoURL = photoURL
-
-                try context.save()
-
                 let docId = "\(vehicleId)_\(type)"
                 let firestorePayload: [String: Any] = [
                     "id": docId,
@@ -677,6 +666,17 @@ struct AddVehicleView: View {
                 ]
 
                 try await firestoreService.saveDocument(firestorePayload, fleetId: authViewModel.fleetId, docId: docId)
+
+                let context = PersistenceController.shared.viewContext
+                let entity = DocumentEntity(context: context)
+                let savedId = UUID()
+                entity.id = savedId
+                entity.vehicleId = vehicleUUID
+                entity.type = type
+                entity.expiryDate = expiry ?? Date()
+                entity.photoURL = photoURL
+
+                try context.save()
 
                 if let expiryDate = expiry {
                     NotificationService.shared.scheduleAllExpiryWarnings(

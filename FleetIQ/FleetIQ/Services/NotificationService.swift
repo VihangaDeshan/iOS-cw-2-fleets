@@ -7,10 +7,25 @@
 
 import Foundation
 import UserNotifications
+import UIKit
 
 final class NotificationService {
     static let shared = NotificationService()
-    private init() {}
+    
+    private init() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+    }
+    
+    @objc private func handleAppBackground() {
+        firedSessionExpiries.removeAll()
+        hasFiredDriverWelcome = false
+        hasFiredManagerWelcome = false
+    }
 
     /// Requests notification permission from user.
     /// Call once on app first launch.
@@ -110,7 +125,6 @@ final class NotificationService {
             .add(request)
     }
 
-    /// Schedules 30-day, 7-day, and day-of expiry warnings.
     func scheduleAllExpiryWarnings(
         vehicleRegistration: String,
         documentType: String,
@@ -123,6 +137,13 @@ final class NotificationService {
             expiryDate: expiryDate,
             vehicleId: vehicleId,
             daysBefore: 30
+        )
+        scheduleExpiryWarning(
+            vehicleRegistration: vehicleRegistration,
+            documentType: documentType,
+            expiryDate: expiryDate,
+            vehicleId: vehicleId,
+            daysBefore: 14
         )
         scheduleExpiryWarning(
             vehicleRegistration: vehicleRegistration,
@@ -148,10 +169,81 @@ final class NotificationService {
                 withIdentifiers: [identifier])
     }
 
+    // MARK: - Expiry Reschedule on App Open
+
+    /// Call this whenever a document is loaded from CoreData or Firestore.
+    /// Fires an immediate "EXPIRED" push if the date is already past (at most once per day),
+    /// or reschedules the standard 30/7/0-day calendar warnings for future dates.
+    // Tracks which expiry warnings have fired during this specific app session.
+    // This resets when the app is fully closed and reopened.
+    private var firedSessionExpiries = Set<String>()
+
+    func rescheduleExpiryIfNeeded(
+        vehicleRegistration: String,
+        documentType: String,
+        expiryDate: Date,
+        vehicleId: UUID
+    ) {
+        let daysUntil = Calendar.current.dateComponents(
+            [.day], from: Calendar.current.startOfDay(for: Date()),
+            to: Calendar.current.startOfDay(for: expiryDate)).day ?? Int.min
+
+        if daysUntil <= 30 {
+            // Ensure this specific notification only fires ONCE per app session.
+            let sessionKey = "expiry-\(vehicleId.uuidString)-\(documentType)"
+            
+            if !firedSessionExpiries.contains(sessionKey) {
+                firedSessionExpiries.insert(sessionKey)
+                
+                if daysUntil < 0 {
+                    sendImmediate(
+                        title: "Document Expired 🚨",
+                        body: "\(vehicleRegistration) \(documentType) has EXPIRED \(abs(daysUntil)) day(s) ago! Renew immediately.",
+                        identifier: sessionKey)
+                } else if daysUntil <= 7 {
+                    sendImmediate(
+                        title: "URGENT: Document Expiring",
+                        body: "URGENT: \(vehicleRegistration) \(documentType) expires in \(daysUntil) days!",
+                        identifier: sessionKey)
+                } else if daysUntil <= 14 {
+                    sendImmediate(
+                        title: "Document Expiring Soon",
+                        body: "\(vehicleRegistration) \(documentType) expires in \(daysUntil) days. Please arrange renewal.",
+                        identifier: sessionKey)
+                } else {
+                    sendImmediate(
+                        title: "Document Expiry Warning",
+                        body: "\(vehicleRegistration) \(documentType) expires in \(daysUntil) days. Renew now to avoid fines.",
+                        identifier: sessionKey)
+                }
+            }
+        }
+
+        // Reschedule standard background warnings.
+        // Past-dated calendar triggers are silently dropped by iOS, so this is safe.
+        scheduleAllExpiryWarnings(
+            vehicleRegistration: vehicleRegistration,
+            documentType: documentType,
+            expiryDate: expiryDate,
+            vehicleId: vehicleId)
+    }
+
+    private func todayString() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+
     // MARK: - Immediate Notifications (UNTimeIntervalNotificationTrigger)
+
+    private var hasFiredDriverWelcome = false
+    private var hasFiredManagerWelcome = false
 
     /// Fires 2 seconds after driver logs in via Face ID or email/password.
     func sendDriverWelcome(name: String) {
+        guard !hasFiredDriverWelcome else { return }
+        hasFiredDriverWelcome = true
+        
         let first = name.split(separator: " ")
             .first.map(String.init) ?? name
         let display = first.isEmpty ? "Driver" : first
@@ -159,6 +251,20 @@ final class NotificationService {
             title: "Welcome back, \(display) 👋",
             body: "Your vehicle status and fault history are ready.",
             identifier: "welcome-driver")
+    }
+
+    /// Fires 2 seconds after manager logs in via Face ID or email/password.
+    func sendManagerWelcome(name: String) {
+        guard !hasFiredManagerWelcome else { return }
+        hasFiredManagerWelcome = true
+        
+        let first = name.split(separator: " ")
+            .first.map(String.init) ?? name
+        let display = first.isEmpty ? "Manager" : first
+        sendImmediate(
+            title: "Welcome back, \(display) 👋",
+            body: "Your fleet dashboard and critical alerts are ready.",
+            identifier: "welcome-manager")
     }
 
     /// Fires to driver when manager updates their fault status.

@@ -44,6 +44,45 @@ final class ServiceLogViewModel: ObservableObject {
         isLoading = false
     }
 
+    /// Fetches service records for a vehicle from Firestore and upserts into CoreData.
+    /// Call this alongside loadRecords to restore data after a fresh install.
+    func syncRecords(vehicleId: UUID, fleetId: String) async {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else { return }
+
+        guard let docs = try? await firestoreService.fetchServiceRecords(
+            fleetId: normalizedFleetId,
+            vehicleId: vehicleId.uuidString),
+              !docs.isEmpty else { return }
+
+        for doc in docs {
+            let data = doc.data()
+            guard let idStr = data["id"] as? String,
+                  let recordUUID = UUID(uuidString: idStr) else { continue }
+
+            let request = ServiceRecordEntity.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", recordUUID as CVarArg)
+            request.fetchLimit = 1
+
+            let entity = (try? context.fetch(request).first)
+                ?? ServiceRecordEntity(context: context)
+            entity.id = recordUUID
+            entity.vehicleId = vehicleId
+
+            if let ts = data["date"] as? Timestamp {
+                entity.date = ts.dateValue()
+            }
+            entity.mileageAtService = (data["mileageAtService"] as? Double) ?? 0
+            entity.garageName = data["garageName"] as? String ?? ""
+            entity.serviceType = data["serviceType"] as? String ?? ""
+            entity.costLKR = (data["costLKR"] as? Double) ?? 0
+            entity.notes = data["notes"] as? String ?? ""
+        }
+
+        try? context.save()
+        loadRecords(for: vehicleId)
+    }
+
     // MARK: - Add Record
 
     /// Saves a new service record to CoreData and Firestore.
@@ -68,8 +107,32 @@ final class ServiceLogViewModel: ObservableObject {
     ) async {
         errorMessage = ""
 
+        let recordId = UUID()
+
+        let data: [String: Any] = [
+            "id": recordId.uuidString,
+            "vehicleId": vehicleId.uuidString,
+            "date": Timestamp(date: date),
+            "mileageAtService": mileage,
+            "garageName": garage,
+            "serviceType": serviceType,
+            "costLKR": cost,
+            "notes": notes
+        ]
+
+        do {
+            try await firestoreService.saveServiceRecord(
+                data,
+                fleetId: fleetId,
+                recordId: recordId.uuidString
+            )
+        } catch {
+            errorMessage = "Cloud sync failed. Record not saved locally."
+            return
+        }
+
         let record = ServiceRecordEntity(context: context)
-        record.id = UUID()
+        record.id = recordId
         record.vehicleId = vehicleId
         record.date = date
         record.mileageAtService = mileage
@@ -94,27 +157,6 @@ final class ServiceLogViewModel: ObservableObject {
             vehicleRegistration: vehicleRegistrationForId(vehicleId),
             predictedDate: predictedDate,
             vehicleId: vehicleId)
-
-        let data: [String: Any] = [
-            "id": record.id?.uuidString ?? "",
-            "vehicleId": vehicleId.uuidString,
-            "date": Timestamp(date: date),
-            "mileageAtService": mileage,
-            "garageName": garage,
-            "serviceType": serviceType,
-            "costLKR": cost,
-            "notes": notes
-        ]
-
-        do {
-            try await firestoreService.saveServiceRecord(
-                data,
-                fleetId: fleetId,
-                recordId: record.id?.uuidString ?? UUID().uuidString
-            )
-        } catch {
-            errorMessage = "Saved locally but cloud sync failed."
-        }
 
         loadRecords(for: vehicleId)
     }
