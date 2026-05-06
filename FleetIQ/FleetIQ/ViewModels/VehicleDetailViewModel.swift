@@ -82,6 +82,11 @@ final class VehicleDetailViewModel: ObservableObject {
         return "\(days) days"
     }
 
+    /// Notifies SwiftUI that the backing vehicle data changed externally.
+    func notifyVehicleChanged() {
+        objectWillChange.send()
+    }
+
     // MARK: - Update
 
     /// Updates vehicle fields in CoreData and Firestore.
@@ -144,6 +149,25 @@ final class VehicleDetailViewModel: ObservableObject {
                 vehicleId: vehicle.id?.uuidString ?? "",
                 data: data
             )
+
+            if let id = vehicle.id, let reg = vehicle.registration {
+                if let insuranceExpiry {
+                    NotificationService.shared.scheduleAllExpiryWarnings(
+                        vehicleRegistration: reg,
+                        documentType: "insurance",
+                        expiryDate: insuranceExpiry,
+                        vehicleId: id
+                    )
+                }
+                if let licenceExpiry {
+                    NotificationService.shared.scheduleAllExpiryWarnings(
+                        vehicleRegistration: reg,
+                        documentType: "licence",
+                        expiryDate: licenceExpiry,
+                        vehicleId: id
+                    )
+                }
+            }
         } catch {
             print("VehicleDetailViewModel update error: \(error)")
         }
@@ -178,13 +202,24 @@ final class VehicleDetailViewModel: ObservableObject {
         isLoading = true
 
         do {
-            vehicle.assignedDriverId = (normalizedDriverName?.isEmpty == false) ? normalizedDriverName : nil
+            // Store the userId (UUID) so the display layer can always look up the correct name.
+            // Fall back to the name string only when there is no userId (legacy / manual assignment).
+            let assignedDriverIdValue: String?
+            if let userId = normalizedDriverUserId, !userId.isEmpty {
+                assignedDriverIdValue = userId
+            } else if let name = normalizedDriverName, !name.isEmpty {
+                assignedDriverIdValue = name
+            } else {
+                assignedDriverIdValue = nil
+            }
+
+            vehicle.assignedDriverId = assignedDriverIdValue
             try context.save()
 
             try await firestoreService.updateVehicle(
                 fleetId: fleetId,
                 vehicleId: vehicleId,
-                data: ["assignedDriverId": normalizedDriverName ?? ""]
+                data: ["assignedDriverId": assignedDriverIdValue ?? ""]
             )
 
             if let previousUserId = normalizedPreviousUserId,

@@ -34,15 +34,17 @@ class FirestoreService {
     static let shared = FirestoreService()
 
     // MARK: - Private Properties
+    /// Lazy Firestore instance ensures Firebase is configured before access.
     private lazy var db: Firestore = {
-        Self.ensureFirebaseConfigured()
+        Self.assertFirebaseConfigured()
         return Firestore.firestore()
     }()
 
     // MARK: - Initializer
     /// Creates a Firestore service instance.
+    /// Firebase must be configured before service is used.
     private init() {
-        Self.ensureFirebaseConfigured()
+        // Check is deferred to lazy db property to allow @AppDelegate time to initialize Firebase
     }
 
     // MARK: - Vehicles
@@ -100,6 +102,34 @@ class FirestoreService {
                 }
 
                 onUpdate(documents)
+            }
+    }
+
+    /// Starts a real-time snapshot listener on a single vehicle document for a fleet.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - vehicleId: Vehicle document identifier.
+    ///   - onUpdate: Callback invoked with latest vehicle data.
+    /// - Returns: The active Firestore listener registration.
+    func listenToVehicle(
+        fleetId: String,
+        vehicleId: String,
+        onUpdate: @escaping ([String: Any]) -> Void
+    ) -> ListenerRegistration {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedVehicleId = vehicleId.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedFleetId.isEmpty, !normalizedVehicleId.isEmpty else {
+            onUpdate([:])
+            return NoOpListenerRegistration()
+        }
+
+        return db.collection("fleets")
+            .document(normalizedFleetId)
+            .collection("vehicles")
+            .document(normalizedVehicleId)
+            .addSnapshotListener { snapshot, _ in
+                onUpdate(snapshot?.data() ?? [:])
             }
     }
 
@@ -187,7 +217,7 @@ class FirestoreService {
 
     /// Uploads a UIImage to Firebase Storage and returns
     /// the download URL string.
-    /// Used for fault photos and document vault only.
+    /// Used for fault photos and document wallet only.
     func uploadPhoto(
         _ image: UIImage,
         path: String
@@ -199,10 +229,94 @@ class FirestoreService {
                 userInfo: [NSLocalizedDescriptionKey:
                     "Could not convert image to JPEG"])
         }
-        let ref = Storage.storage().reference().child(path)
-        let _ = try await ref.putDataAsync(data)
-        let url = try await ref.downloadURL()
-        return url.absoluteString
+
+        let normalizedPath = normalizedStoragePath(path)
+        guard !normalizedPath.isEmpty else {
+            throw NSError(
+                domain: "FleetIQ",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid Firebase Storage path."]
+            )
+        }
+
+        let ref = Storage.storage().reference().child(normalizedPath)
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        let uploadedMetadata = try await ref.putDataAsync(data, metadata: metadata)
+        #if DEBUG
+        print("[FirestoreService] putData succeeded: path=\(uploadedMetadata.path ?? normalizedPath), size=\(uploadedMetadata.size)")
+        #endif
+
+        // Storage can briefly return "object does not exist" immediately after upload.
+        var lastError: Error?
+        for attempt in 1...8 {
+            do {
+                _ = try await ref.getMetadata()
+                let url = try await ref.downloadURL()
+                return url.absoluteString
+            } catch {
+                lastError = error
+                #if DEBUG
+                let nsError = error as NSError
+                print("[FirestoreService] downloadURL retry \(attempt)/8 failed for \(normalizedPath): \(nsError.domain) (\(nsError.code)) - \(nsError.localizedDescription)")
+                #endif
+                if attempt < 8 {
+                    let delayNanoseconds = min(UInt64(2_000_000_000), UInt64(attempt) * 400_000_000)
+                    try? await Task.sleep(nanoseconds: delayNanoseconds)
+                }
+            }
+        }
+
+        if isStorageObjectNotFound(lastError) {
+            #if DEBUG
+            print("[FirestoreService] Upload succeeded but URL is not yet readable for \(normalizedPath). Saving storage path placeholder.")
+            #endif
+            return "storage_path:\(normalizedPath)"
+        }
+
+        throw lastError ?? NSError(
+            domain: "FleetIQ",
+            code: -3,
+            userInfo: [NSLocalizedDescriptionKey: "Photo upload completed but URL retrieval failed."]
+        )
+    }
+
+    /// Resolves a stored photo reference into a direct download URL when available.
+    /// Supports both direct `http(s)` URLs and `storage_path:{path}` placeholders.
+    /// Returns nil when the placeholder object is not yet readable.
+    func resolveStoragePathReference(_ reference: String) async throws -> String? {
+        let trimmed = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
+            return trimmed
+        }
+
+        let prefix = "storage_path:"
+        guard trimmed.hasPrefix(prefix) else {
+            return nil
+        }
+
+        let rawPath = String(trimmed.dropFirst(prefix.count))
+        let normalizedPath = normalizedStoragePath(rawPath)
+        guard !normalizedPath.isEmpty else {
+            return nil
+        }
+
+        let ref = Storage.storage().reference().child(normalizedPath)
+
+        do {
+            let url = try await ref.downloadURL()
+            return url.absoluteString
+        } catch {
+            if isStorageObjectNotFound(error) {
+                return nil
+            }
+
+            throw error
+        }
     }
 
     /// Builds the Firebase Storage path for a fault report photo.
@@ -213,6 +327,15 @@ class FirestoreService {
         filename: String
     ) -> String {
         "fleets/\(fleetId)/faults/\(faultId)/\(filename).jpg"
+    }
+
+    /// Builds default Firebase Storage path for a fault report photo.
+    /// Path format: fleets/{fleetId}/faults/{faultId}/photo.jpg
+    func faultPhotoPath(
+        fleetId: String,
+        faultId: String
+    ) -> String {
+        "fleets/\(fleetId)/faults/\(faultId)/photo.jpg"
     }
 
     /// Builds the Firebase Storage path for a document-vault photo.
@@ -314,6 +437,52 @@ class FirestoreService {
         }
     }
 
+    /// Fetches all fuel logs for a fleet once, sorted by newest first.
+    /// - Parameter fleetId: Fleet document identifier.
+    /// - Returns: Firestore query documents for fuel logs.
+    func fetchFuelLogs(
+        fleetId: String
+    ) async throws -> [QueryDocumentSnapshot] {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[QueryDocumentSnapshot], Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("fuelLogs")
+                .order(by: "date", descending: true)
+                .getDocuments { snapshot, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: snapshot?.documents ?? [])
+                }
+        }
+    }
+
+    /// Starts a real-time listener for all fuel logs in a fleet.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - onUpdate: Callback invoked with latest fuel-log documents.
+    /// - Returns: Active listener registration.
+    func listenToFuelLogs(
+        fleetId: String,
+        onUpdate: @escaping ([QueryDocumentSnapshot]) -> Void
+    ) -> ListenerRegistration {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            onUpdate([])
+            return NoOpListenerRegistration()
+        }
+
+        return db.collection("fleets")
+            .document(normalizedFleetId)
+            .collection("fuelLogs")
+            .order(by: "date", descending: true)
+            .addSnapshotListener { snapshot, _ in
+                onUpdate(snapshot?.documents ?? [])
+            }
+    }
+
     /// Deletes a fuel-log document from Firestore.
     /// - Parameters:
     ///   - fleetId: Fleet document identifier.
@@ -326,6 +495,106 @@ class FirestoreService {
             db.collection("fleets")
                 .document(fleetId)
                 .collection("fuelLogs")
+                .document(logId)
+                .delete { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
+    // MARK: - Trip Logs
+
+    /// Saves a trip-log document to fleets/{fleetId}/tripLogs/{logId}.
+    /// - Parameters:
+    ///   - data: Trip-log payload.
+    ///   - fleetId: Fleet document identifier.
+    ///   - logId: Trip-log identifier.
+    func saveTripLog(
+        _ data: [String: Any],
+        fleetId: String,
+        logId: String
+    ) async throws {
+        let payload = tripLogPayload(from: data, logId: logId)
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("tripLogs")
+                .document(logId)
+                .setData(payload) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Fetches all trip logs for a fleet once, sorted by newest first.
+    /// - Parameter fleetId: Fleet document identifier.
+    /// - Returns: Firestore query documents for trip logs.
+    func fetchTripLogs(
+        fleetId: String
+    ) async throws -> [QueryDocumentSnapshot] {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[QueryDocumentSnapshot], Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("tripLogs")
+                .order(by: "date", descending: true)
+                .getDocuments { snapshot, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: snapshot?.documents ?? [])
+                }
+        }
+    }
+
+    /// Starts a real-time listener for all trip logs in a fleet.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - onUpdate: Callback invoked with latest trip-log documents.
+    /// - Returns: Active listener registration.
+    func listenToTripLogs(
+        fleetId: String,
+        onUpdate: @escaping ([QueryDocumentSnapshot]) -> Void
+    ) -> ListenerRegistration {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            onUpdate([])
+            return NoOpListenerRegistration()
+        }
+
+        return db.collection("fleets")
+            .document(normalizedFleetId)
+            .collection("tripLogs")
+            .order(by: "date", descending: true)
+            .addSnapshotListener { snapshot, _ in
+                onUpdate(snapshot?.documents ?? [])
+            }
+    }
+
+    /// Deletes a trip-log document from Firestore.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - logId: Trip-log identifier.
+    func deleteTripLog(
+        fleetId: String,
+        logId: String
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("tripLogs")
                 .document(logId)
                 .delete { error in
                     if let error {
@@ -369,6 +638,121 @@ class FirestoreService {
     }
 
     // MARK: - Fault Reports
+
+    /// Saves a fault report document to fleets/{fleetId}/faultReports/{faultId}.
+    /// - Parameters:
+    ///   - data: Fault report payload.
+    ///   - fleetId: Fleet document identifier.
+    ///   - faultId: Fault-report identifier.
+    func saveFaultReport(
+        _ data: [String: Any],
+        fleetId: String,
+        faultId: String
+    ) async throws {
+        var payload = data
+        payload["id"] = payload["id"] ?? faultId
+        payload["updatedAt"] = Timestamp(date: Date())
+
+        if payload["createdAt"] == nil {
+            payload["createdAt"] = Timestamp(date: Date())
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("faultReports")
+                .document(faultId)
+                .setData(payload, merge: true) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Updates only the status field on a fault report document.
+    /// Path: fleets/{fleetId}/faultReports/{faultId}
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - faultId: Fault-report identifier.
+    ///   - status: New fault status value.
+    func updateFaultStatus(
+        fleetId: String,
+        faultId: String,
+        status: String
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("faultReports")
+                .document(faultId)
+                .updateData([
+                    "status": status,
+                    "updatedAt": Timestamp(date: Date())
+                ]) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
+    /// Starts a real-time listener for all fault reports in a fleet.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - onUpdate: Callback invoked with latest fault-report documents.
+    /// - Returns: Active listener registration.
+    func listenToFaultReports(
+        fleetId: String,
+        onUpdate: @escaping ([QueryDocumentSnapshot]) -> Void
+    ) -> ListenerRegistration {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            onUpdate([])
+            return NoOpListenerRegistration()
+        }
+
+        return db.collection("fleets")
+            .document(normalizedFleetId)
+            .collection("faultReports")
+            .addSnapshotListener { snapshot, _ in
+                onUpdate(snapshot?.documents ?? [])
+            }
+    }
+
+    /// Starts a real-time listener for one driver's fault reports in a fleet.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - driverId: Driver identifier.
+    ///   - onUpdate: Callback invoked with latest driver-specific fault documents.
+    /// - Returns: Active listener registration.
+    func listenToMyFaults(
+        fleetId: String,
+        driverId: String,
+        onUpdate: @escaping ([QueryDocumentSnapshot]) -> Void
+    ) -> ListenerRegistration {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDriverId = driverId.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedFleetId.isEmpty, !normalizedDriverId.isEmpty else {
+            onUpdate([])
+            return NoOpListenerRegistration()
+        }
+
+        return db.collection("fleets")
+            .document(normalizedFleetId)
+            .collection("faultReports")
+            .whereField("driverId", isEqualTo: normalizedDriverId)
+            .addSnapshotListener { snapshot, _ in
+                onUpdate(snapshot?.documents ?? [])
+            }
+    }
 
     /// Updates an existing fault report document.
     /// Path: fleets/{fleetId}/faultReports/{faultId}
@@ -449,6 +833,32 @@ class FirestoreService {
         }
     }
 
+    /// Deletes a Storage object at the provided storage path.
+    /// Accepts either a raw storage path (e.g. "fleets/.../file.jpg") or
+    /// a normalized path. Ignores "object not found" errors.
+    /// - Parameter path: Storage path to delete.
+    func deleteStorageObject(path: String) async throws {
+        let normalizedPath = normalizedStoragePath(path)
+        guard !normalizedPath.isEmpty else { return }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let ref = Storage.storage().reference().child(normalizedPath)
+            ref.delete { error in
+                if let error {
+                    if self.isStorageObjectNotFound(error) {
+                        continuation.resume(returning: ())
+                        return
+                    }
+
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                continuation.resume(returning: ())
+            }
+        }
+    }
+
     // MARK: - Driver Users
 
     /// Fetches all drivers linked to a fleet.
@@ -467,30 +877,34 @@ class FirestoreService {
                 .collection("drivers")
         )
 
-        let usersByFleetIdDocs = await fetchUserDriverDocsIfAllowed(
+        // Single-field query only — composite (fleetId + role) requires a Firestore
+        // composite index that may not exist. Role is filtered client-side below.
+        let usersByFleetId = await fetchUserDriverDocsIfAllowed(
             for: db.collection("users")
                 .whereField("fleetId", isEqualTo: normalizedFleetId)
         )
-        let usersByLegacyFleetIdDocs = await fetchUserDriverDocsIfAllowed(
-            for: db.collection("users")
-                .whereField("fleetID", isEqualTo: normalizedFleetId)
-        )
-        let usersByFleetNameDocs = await fetchUserDriverDocsIfAllowed(
-            for: db.collection("users")
-                .whereField("fleetName", isEqualTo: normalizedFleetId)
-        )
 
         let fleetDrivers = mapFleetDriverDocsToFleetDrivers(fleetCollectionDocs, fleetId: normalizedFleetId)
-        let driversFromUsersByFleetId = mapUserDocsToFleetDrivers(usersByFleetIdDocs, fleetId: normalizedFleetId)
-        let driversFromUsersByLegacyFleetId = mapUserDocsToFleetDrivers(usersByLegacyFleetIdDocs, fleetId: normalizedFleetId)
-        let driversFromUsersByFleetName = mapUserDocsToFleetDrivers(usersByFleetNameDocs, fleetId: normalizedFleetId)
+        let userDriversByFleetId = mapUserDocsToFleetDrivers(usersByFleetId, fleetId: normalizedFleetId)
 
-        return mergeFleetDriverLists([
-            fleetDrivers,
-            driversFromUsersByFleetId,
-            driversFromUsersByLegacyFleetId,
-            driversFromUsersByFleetName
-        ])
+        // Merge all sources; fleet-collection docs may have empty names when the
+        // driver registered via Auth and was never saved via AddDriverView.
+        // Apply the display-name fallback AFTER merging so the users-collection
+        // name (e.g. "Deshan") wins over the fleet-doc empty-string.
+        let merged = mergeFleetDriverLists([fleetDrivers, userDriversByFleetId])
+        return merged.map { driver in
+            guard driver.name.isEmpty else { return driver }
+            let fallbackName = driver.email.split(separator: "@").first.map(String.init) ?? "Driver"
+            return FleetDriverUser(
+                userId: driver.userId,
+                name: fallbackName,
+                email: driver.email,
+                phone: driver.phone,
+                fleetId: driver.fleetId,
+                role: driver.role,
+                assignedVehicleId: driver.assignedVehicleId
+            )
+        }
     }
 
     /// Creates or updates a manager-created driver profile in users collection.
@@ -676,6 +1090,34 @@ class FirestoreService {
         ]
     }
 
+    /// Builds a strict Firestore payload for trip-log documents.
+    /// - Parameters:
+    ///   - data: Incoming payload candidate.
+    ///   - logId: Trip-log identifier to persist as the `id` field.
+    /// - Returns: Dictionary matching trip-log schema.
+    private func tripLogPayload(from data: [String: Any], logId: String) -> [String: Any] {
+        let dateValue: Timestamp
+        if let timestamp = data["date"] as? Timestamp {
+            dateValue = timestamp
+        } else if let date = data["date"] as? Date {
+            dateValue = Timestamp(date: date)
+        } else {
+            dateValue = Timestamp(date: Date())
+        }
+
+        return [
+            "id": logId,
+            "vehicleId": data["vehicleId"] as? String ?? "",
+            "driverId": data["driverId"] as? String ?? "",
+            "purpose": data["purpose"] as? String ?? "",
+            "destination": data["destination"] as? String ?? "",
+            "startMileage": data["startMileage"] as? Double ?? 0,
+            "endMileage": data["endMileage"] as? Double ?? 0,
+            "distanceKm": data["distanceKm"] as? Double ?? 0,
+            "date": dateValue
+        ]
+    }
+
     /// Builds a strict Firestore payload for driver documents.
     /// - Parameters:
     ///   - data: Incoming payload candidate.
@@ -694,24 +1136,43 @@ class FirestoreService {
         ]
     }
 
-    /// Ensures the default Firebase app is configured before using Firestore.
-    private static func ensureFirebaseConfigured() {
+    /// Guards against using FirestoreService before app startup configured Firebase.
+    private static func assertFirebaseConfigured() {
 #if canImport(FirebaseCore)
-        if FirebaseApp.app() == nil {
-            if Thread.isMainThread {
-                FirebaseApp.configure()
-            } else {
-                DispatchQueue.main.sync {
-                    if FirebaseApp.app() == nil {
-                        FirebaseApp.configure()
-                    }
-                }
-            }
-        }
+        precondition(
+            FirebaseApp.app() != nil,
+            "FirebaseApp.configure() must run in AppDelegate before using FirestoreService."
+        )
 #endif
     }
 
+    /// Normalizes user-provided storage paths to avoid accidental invalid child references.
+    private func normalizedStoragePath(_ rawPath: String) -> String {
+        let segments = rawPath
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return segments.joined(separator: "/")
+    }
+
+    /// Returns true when Storage reports the object is not yet readable.
+    private func isStorageObjectNotFound(_ error: Error?) -> Bool {
+        guard let nsError = error as NSError? else {
+            return false
+        }
+
+        if nsError.domain == StorageErrorDomain,
+           nsError.code == StorageErrorCode.objectNotFound.rawValue {
+            return true
+        }
+
+        return nsError.localizedDescription.lowercased().contains("does not exist")
+    }
+
     /// Maps fleet drivers collection docs into fleet-driver models.
+    /// Returns empty name when the doc has no name field so mergeFleetDriverLists
+    /// can prefer the richer users-collection document instead.
     private func mapFleetDriverDocsToFleetDrivers(_ docs: [QueryDocumentSnapshot], fleetId: String) -> [FleetDriverUser] {
         docs.compactMap { doc in
             let data = doc.data()
@@ -720,10 +1181,19 @@ class FirestoreService {
                 return nil
             }
 
+            // Use the raw name value (empty string if missing) so that mergeDriver
+            // can prefer a richer name from the users collection.
+            let rawName = ["name", "fullName", "displayName", "username"]
+                .compactMap { data[$0] as? String }
+                .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+
+            let resolvedEmail = driverEmail(from: data)
+
             return FleetDriverUser(
                 userId: doc.documentID,
-                name: data["name"] as? String ?? "",
-                email: data["email"] as? String ?? "",
+                name: rawName,
+                email: resolvedEmail,
                 phone: data["phone"] as? String ?? "",
                 fleetId: fleetId,
                 role: role,
@@ -750,16 +1220,59 @@ class FirestoreService {
                 ?? (data["fleetName"] as? String)
                 ?? fleetId
 
+            let resolvedName = driverDisplayName(from: data, userId: doc.documentID)
+            let resolvedEmail = driverEmail(from: data)
+
             return FleetDriverUser(
                 userId: doc.documentID,
-                name: data["name"] as? String ?? "",
-                email: data["email"] as? String ?? "",
+                name: resolvedName,
+                email: resolvedEmail,
                 phone: data["phone"] as? String ?? "",
                 fleetId: resolvedFleetId,
                 role: role,
                 assignedVehicleId: data["assignedVehicleId"] as? String ?? ""
             )
         }
+    }
+
+    private func driverDisplayName(from data: [String: Any], userId: String) -> String {
+        let candidates: [String?] = [
+            data["name"] as? String,
+            data["fullName"] as? String,
+            data["displayName"] as? String,
+            data["username"] as? String
+        ]
+
+        for candidate in candidates {
+            let trimmed = (candidate ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+
+        let email = driverEmail(from: data)
+        if let prefix = email.split(separator: "@").first,
+           !prefix.isEmpty {
+            return String(prefix)
+        }
+
+        return "Driver"
+    }
+
+    private func driverEmail(from data: [String: Any]) -> String {
+        let candidates: [String?] = [
+            data["email"] as? String,
+            data["mail"] as? String
+        ]
+
+        for candidate in candidates {
+            let trimmed = (candidate ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+
+        return ""
     }
 
     /// Merges driver lists from multiple Firestore sources by user id.

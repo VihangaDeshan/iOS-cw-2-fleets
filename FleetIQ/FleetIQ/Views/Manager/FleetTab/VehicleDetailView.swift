@@ -95,8 +95,18 @@ struct VehicleDetailView: View {
             DocumentVaultView(vehicle: viewModel.vehicle)
                 .environmentObject(authViewModel)
         }
+        .onChange(of: showDocumentVault) { _, isPresented in
+            if !isPresented {
+                viewModel.notifyVehicleChanged()
+            }
+        }
         .sheet(isPresented: $showAssignDriver) {
             assignDriverSheet
+        }
+        .onAppear {
+            Task {
+                await loadDriversForAssignment()
+            }
         }
     }
 
@@ -219,13 +229,13 @@ struct VehicleDetailView: View {
                     .fill(Color.navyPrimary)
                     .frame(width: 32, height: 32)
                     .overlay(
-                        Text(initials(viewModel.vehicle.assignedDriverId ?? "?"))
+                        Text(initials(assignedDriverDisplayName))
                             .font(.system(size: 12, weight: .bold))
                             .foregroundColor(.white)
                     )
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(viewModel.vehicle.assignedDriverId ?? "No driver assigned")
+                    Text(assignedDriverDisplayName)
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.primary)
 
@@ -246,7 +256,7 @@ struct VehicleDetailView: View {
             .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Assigned driver: \(viewModel.vehicle.assignedDriverId ?? "none")")
+        .accessibilityLabel("Assigned driver: \(assignedDriverDisplayName)")
         .accessibilityHint("Double tap to change driver")
     }
 
@@ -352,6 +362,7 @@ struct VehicleDetailView: View {
             documentRow(
                 icon: "doc.text.fill",
                 name: "Revenue Licence",
+                type: "licence",
                 date: viewModel.vehicle.licenceExpiry
             )
 
@@ -361,6 +372,7 @@ struct VehicleDetailView: View {
             documentRow(
                 icon: "lock.shield.fill",
                 name: "Insurance Certificate",
+                type: "insurance",
                 date: viewModel.vehicle.insuranceExpiry
             )
         }
@@ -375,7 +387,32 @@ struct VehicleDetailView: View {
     ///   - name: Document title.
     ///   - date: Expiry date.
     /// - Returns: Document row view.
-    private func documentRow(icon: String, name: String, date: Date?) -> some View {
+    private func documentRow(icon: String, name: String, type: String, date: Date?) -> some View {
+        let daysRemaining = viewModel.daysRemaining(until: date)
+        let isActionable = (daysRemaining ?? 1) <= 30
+
+        return Group {
+            if isActionable {
+                Button {
+                    showDocumentVault = true
+                } label: {
+                    documentRowContent(icon: icon, name: name, date: date, showsChevron: true)
+                }
+                .buttonStyle(.plain)
+            } else {
+                documentRowContent(icon: icon, name: name, date: date, showsChevron: false)
+            }
+        }
+        .accessibilityLabel("\(name), \(viewModel.expiryChipText(for: date))")
+    }
+
+    /// Builds the visual layout used by each document row.
+    private func documentRowContent(
+        icon: String,
+        name: String,
+        date: Date?,
+        showsChevron: Bool
+    ) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 16))
@@ -406,9 +443,17 @@ struct VehicleDetailView: View {
                 .padding(.vertical, 3)
                 .background(viewModel.expiryColour(for: date).opacity(0.12))
                 .clipShape(Capsule())
+
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(.systemGray3))
+                    .padding(.leading, 4)
+            }
         }
-        .padding(13)
-        .accessibilityLabel("\(name), \(viewModel.expiryChipText(for: date))")
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Actions Card
@@ -436,11 +481,17 @@ struct VehicleDetailView: View {
             Divider()
                 .padding(.leading, 48)
 
-            NavigationLink {
+            navigationActionRow(icon: "clock.fill", title: "View Service History") {
                 ServiceHistoryView(vehicle: viewModel.vehicle)
                     .environmentObject(authViewModel)
-            } label: {
-                actionRowLabel(icon: "clock.fill", title: "View Service History")
+            }
+
+            Divider()
+                .padding(.leading, 48)
+
+            navigationActionRow(icon: "road.lanes", title: "View Trip History") {
+                TripHistoryView(vehicle: viewModel.vehicle)
+                    .environmentObject(authViewModel)
             }
 
             Divider()
@@ -458,7 +509,7 @@ struct VehicleDetailView: View {
 
             actionRow(
                 icon: "folder.fill",
-                title: "Document Vault"
+                title: "Document Wallet"
             ) {
                 showDocumentVault = true
             }
@@ -478,8 +529,25 @@ struct VehicleDetailView: View {
     private func actionRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             actionRowLabel(icon: icon, title: title)
-                .padding(13)
         }
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .padding(.horizontal, 13)
+        .accessibilityLabel(title)
+        .accessibilityHint("Double tap to open")
+    }
+
+    /// Builds a navigation row with the same sizing as button rows.
+    private func navigationActionRow<Destination: View>(
+        icon: String,
+        title: String,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink(destination: destination()) {
+            actionRowLabel(icon: icon, title: title)
+        }
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .padding(.horizontal, 13)
+        .contentShape(Rectangle())
         .accessibilityLabel(title)
         .accessibilityHint("Double tap to open")
     }
@@ -546,6 +614,44 @@ struct VehicleDetailView: View {
         return formatter.string(from: date)
     }
 
+    private var assignedDriverDisplayName: String {
+        let raw = (viewModel.vehicle.assignedDriverId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !raw.isEmpty else {
+            return "No driver assigned"
+        }
+
+        // 1. Always try direct userId match first.
+        //    Works for both UUID-format IDs and Firebase Auth UIDs (e.g. "6xb64hfb...").
+        if let matched = drivers.first(where: { $0.userId == raw }),
+           !matched.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return matched.name
+        }
+
+        // 2. Check if any loaded driver has this vehicle assigned to them.
+        let currentVehicleId = viewModel.vehicle.id?.uuidString ?? ""
+        if !currentVehicleId.isEmpty,
+           let matchedByVehicle = drivers.first(where: { $0.assignedVehicleId == currentVehicleId }),
+           !matchedByVehicle.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return matchedByVehicle.name
+        }
+
+        // 3. Drivers still loading — show a neutral placeholder.
+        if isLoadingDrivers {
+            return "Loading..."
+        }
+
+        // 4. If the value looks like a raw ID (long, no spaces) rather than a
+        //    human name, hide it from the user.
+        if raw.count > 12 && !raw.contains(" ") {
+            return "Assigned Driver"
+        }
+
+        // 5. Legacy data: the field stored a plain name string — return it directly.
+        return raw
+    }
+
     /// Loads drivers for assignment and preselects the currently assigned driver when possible.
     private func loadDriversForAssignment() async {
         isLoadingDrivers = true
@@ -556,6 +662,15 @@ struct VehicleDetailView: View {
             let currentAssignedName = (viewModel.vehicle.assignedDriverId ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let currentVehicleId = viewModel.vehicle.id?.uuidString ?? ""
+
+            if UUID(uuidString: currentAssignedName) != nil,
+               let matchByUserId = drivers.first(where: { $0.userId == currentAssignedName }) {
+                selectedDriverUserId = matchByUserId.userId
+                selectedDriverName = matchByUserId.name
+                previousDriverUserId = matchByUserId.userId
+                isLoadingDrivers = false
+                return
+            }
 
             if let assignedByVehicle = drivers.first(where: { $0.assignedVehicleId == currentVehicleId }) {
                 selectedDriverUserId = assignedByVehicle.userId

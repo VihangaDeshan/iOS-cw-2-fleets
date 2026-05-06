@@ -7,6 +7,9 @@
 
 import SwiftUI
 import PhotosUI
+import CoreData
+import FirebaseFirestore
+import UIKit
 
 // MARK: - Add Vehicle View
 struct AddVehicleView: View {
@@ -601,7 +604,7 @@ struct AddVehicleView: View {
 
         isSaving = true
 
-        await fleetViewModel.addVehicle(
+        let createdVehicleId = await fleetViewModel.addVehicle(
             registration: normalizedRegistration,
             make: make,
             model: model,
@@ -615,8 +618,84 @@ struct AddVehicleView: View {
             fleetId: authViewModel.fleetId
         )
 
+        // If vehicle creation succeeded, upload any scanned documents into
+        // the Document Wallet so they are associated with the newly created vehicle.
+        if let vehicleId = createdVehicleId {
+            await uploadScannedDocuments(for: vehicleId, registration: normalizedRegistration)
+        }
+
         isSaving = false
         dismiss()
+    }
+
+    @MainActor
+    private func uploadScannedDocuments(for vehicleId: String, registration normalizedRegistration: String) async {
+        // Small helper to process a PhotosPickerItem into UIImage data.
+        func imageFromItem(_ item: PhotosPickerItem?) async -> UIImage? {
+            guard let item = item,
+                  let data = try? await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else {
+                return nil
+            }
+
+            return image
+        }
+
+        // Upload a document of the given type if a scanned photo exists.
+        func uploadIfPresent(type: String, item: PhotosPickerItem?, expiry: Date?) async {
+            guard let image = await imageFromItem(item) else { return }
+
+            do {
+                let storagePath = try firestoreService.documentPhotoPath(
+                    fleetId: authViewModel.fleetId,
+                    vehicleId: vehicleId,
+                    docType: type
+                )
+
+                let photoURL = try await firestoreService.uploadPhoto(image, path: storagePath)
+
+                guard let vehicleUUID = UUID(uuidString: vehicleId) else { return }
+                let context = PersistenceController.shared.viewContext
+                let entity = DocumentEntity(context: context)
+                let savedId = UUID()
+                entity.id = savedId
+                entity.vehicleId = vehicleUUID
+                entity.type = type
+                entity.expiryDate = expiry ?? Date()
+                entity.photoURL = photoURL
+
+                try context.save()
+
+                let docId = "\(vehicleId)_\(type)"
+                let firestorePayload: [String: Any] = [
+                    "id": docId,
+                    "vehicleId": vehicleId,
+                    "type": type,
+                    "expiryDate": expiry.map { Timestamp(date: $0) } ?? NSNull(),
+                    "photoURL": photoURL,
+                    "updatedAt": Timestamp(date: Date())
+                ]
+
+                try await firestoreService.saveDocument(firestorePayload, fleetId: authViewModel.fleetId, docId: docId)
+
+                if let expiryDate = expiry {
+                    NotificationService.shared.scheduleAllExpiryWarnings(
+                        vehicleRegistration: normalizedRegistration,
+                        documentType: type,
+                        expiryDate: expiryDate,
+                        vehicleId: vehicleUUID
+                    )
+                }
+            } catch {
+                // Non-fatal: scanned document upload should not block vehicle creation.
+                print("Failed to save scanned document (\(type)): \(error)")
+            }
+        }
+
+        await uploadIfPresent(type: "insurance", item: insuranceItem, expiry: hasInsuranceDate ? insuranceExpiry : nil)
+        await uploadIfPresent(type: "licence", item: licenceItem, expiry: hasLicenceDate ? licenceExpiry : nil)
+        await uploadIfPresent(type: "emission", item: emissionItem, expiry: hasEmissionDate ? emissionExpiry : nil)
+        // registration image isn't stored in wallet currently, skip it.
     }
 
     // MARK: - Reusable Rows

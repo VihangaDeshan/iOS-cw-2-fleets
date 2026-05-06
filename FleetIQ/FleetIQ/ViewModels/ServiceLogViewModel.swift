@@ -85,6 +85,16 @@ final class ServiceLogViewModel: ObservableObject {
             return
         }
 
+        let avgInterval = averageServiceIntervalKm()
+        let predictedDate = Calendar.current.date(
+            byAdding: .day,
+            value: Int(avgInterval / 80),
+            to: Date()) ?? Date()
+        NotificationService.shared.scheduleServiceDue(
+            vehicleRegistration: vehicleRegistrationForId(vehicleId),
+            predictedDate: predictedDate,
+            vehicleId: vehicleId)
+
         let data: [String: Any] = [
             "id": record.id?.uuidString ?? "",
             "vehicleId": vehicleId.uuidString,
@@ -192,5 +202,12 @@ final class ServiceLogViewModel: ObservableObject {
     /// Calculates total spent amount from all loaded records.
     var totalCostLKR: Double {
         records.reduce(0) { $0 + $1.costLKR }
+    }
+
+    private func vehicleRegistrationForId(_ id: UUID) -> String {
+        let request = VehicleEntity.fetchRequest()
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        request.fetchLimit = 1
+        return (try? context.fetch(request))?.first?.registration ?? "Vehicle"
     }
 }

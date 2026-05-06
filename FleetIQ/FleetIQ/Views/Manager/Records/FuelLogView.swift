@@ -2,11 +2,12 @@
 //  FuelLogView.swift
 //  FleetIQ
 //
-//  Created by GitHub Copilot on 2026-04-12.
+//  Created by Vihanga Deshan Sammandapperuma on 2026-04-12.
 //
 
 import SwiftUI
 import CoreData
+import FirebaseFirestore
 
 // MARK: - Fuel Log View
 struct FuelLogView: View {
@@ -18,6 +19,7 @@ struct FuelLogView: View {
     @State private var logs: [FuelLogEntity] = []
     @State private var showAddSheet = false
     @State private var errorText = ""
+    @State private var fuelListener: ListenerRegistration?
 
     private let firestoreService = FirestoreService.shared
 
@@ -67,7 +69,14 @@ struct FuelLogView: View {
             .environmentObject(authViewModel)
             .environment(\.managedObjectContext, context)
         }
-        .onAppear(perform: loadLogs)
+        .onAppear {
+            loadLogs()
+            startFuelListener()
+        }
+        .onDisappear {
+            fuelListener?.remove()
+            fuelListener = nil
+        }
     }
 
     private func row(for log: FuelLogEntity) -> some View {
@@ -146,6 +155,118 @@ struct FuelLogView: View {
                 errorText = "Deleted locally, but cloud delete failed."
             }
         }
+    }
+
+    private func startFuelListener() {
+        fuelListener?.remove()
+        fuelListener = nil
+
+        guard let vehicleId = vehicle.id else {
+            return
+        }
+
+        let normalizedFleetId = authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else {
+            return
+        }
+
+        fuelListener = firestoreService.listenToFuelLogs(fleetId: normalizedFleetId) { docs in
+            Task { @MainActor in
+                syncFuelDocsIntoLocal(docs, vehicleId: vehicleId)
+            }
+        }
+    }
+
+    private func syncFuelDocsIntoLocal(_ docs: [QueryDocumentSnapshot], vehicleId: UUID) {
+        let vehicleIdString = vehicleId.uuidString
+
+        let matchingDocs = docs.filter { doc in
+            let data = doc.data()
+            return (data["vehicleId"] as? String ?? "") == vehicleIdString
+        }
+
+        let syncedIDs: Set<UUID> = Set(matchingDocs.compactMap { doc in
+            let data = doc.data()
+            let rawId = (data["id"] as? String) ?? doc.documentID
+            return UUID(uuidString: rawId)
+        })
+
+        let request = NSFetchRequest<FuelLogEntity>(entityName: "FuelLogEntity")
+        request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
+        let existing = (try? context.fetch(request)) ?? []
+
+        for item in existing {
+            guard let id = item.id else {
+                continue
+            }
+
+            if !syncedIDs.contains(id) {
+                context.delete(item)
+            }
+        }
+
+        for doc in matchingDocs {
+            let data = doc.data()
+            let rawId = (data["id"] as? String) ?? doc.documentID
+            guard let logUUID = UUID(uuidString: rawId) else {
+                continue
+            }
+
+            let log = upsertFuelLogEntity(with: logUUID)
+            log.id = logUUID
+            log.vehicleId = vehicleId
+            log.date = parseDateValue(data["date"]) ?? Date()
+            log.mileage = numericValue(from: data["mileage"])
+            log.litres = numericValue(from: data["litres"])
+            log.totalCostLKR = numericValue(from: data["totalCostLKR"])
+            log.costPerLitre = numericValue(from: data["costPerLitre"])
+            log.kmPerLitre = numericValue(from: data["kmPerLitre"])
+        }
+
+        try? context.save()
+        loadLogs()
+    }
+
+    private func upsertFuelLogEntity(with id: UUID) -> FuelLogEntity {
+        let request = NSFetchRequest<FuelLogEntity>(entityName: "FuelLogEntity")
+        request.fetchLimit = 1
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+
+        if let existing = try? context.fetch(request).first {
+            return existing
+        }
+
+        let created = FuelLogEntity(context: context)
+        created.id = id
+        return created
+    }
+
+    private func parseDateValue(_ value: Any?) -> Date? {
+        if let timestamp = value as? Timestamp {
+            return timestamp.dateValue()
+        }
+
+        if let date = value as? Date {
+            return date
+        }
+
+        return nil
+    }
+
+    private func numericValue(from value: Any?) -> Double {
+        if let double = value as? Double {
+            return double
+        }
+
+        if let int = value as? Int {
+            return Double(int)
+        }
+
+        if let string = value as? String {
+            return Double(string) ?? 0
+        }
+
+        return 0
     }
 
     private func mediumDate(_ date: Date) -> String {
@@ -243,6 +364,28 @@ private struct AddFuelLogSheet: View {
 
         isSaving = true
 
+        // Persist locally first to avoid duplicates when the realtime listener triggers
+        let log = FuelLogEntity(context: context)
+        log.id = logId
+        log.vehicleId = vehicleId
+        log.date = date
+        log.mileage = mileageValue
+        log.litres = litresValue
+        log.totalCostLKR = totalValue
+        log.costPerLitre = totalValue / litresValue
+        log.kmPerLitre = efficiency
+
+        vehicle.currentMileage = max(vehicle.currentMileage, mileageValue)
+
+        do {
+            try context.save()
+        } catch {
+            errorText = "Could not save fuel log locally."
+            isSaving = false
+            return
+        }
+
+        // Attempt cloud sync but keep local record if it fails
         do {
             let payload: [String: Any] = [
                 "id": logId.uuidString,
@@ -261,32 +404,16 @@ private struct AddFuelLogSheet: View {
                 logId: logId.uuidString
             )
         } catch {
-            errorText = "Cloud sync failed for fuel log."
+            errorText = "Cloud sync failed for fuel log; saved locally."
             isSaving = false
+            onSaved()
+            dismiss()
             return
         }
 
-        let log = FuelLogEntity(context: context)
-        log.id = logId
-        log.vehicleId = vehicleId
-        log.date = date
-        log.mileage = mileageValue
-        log.litres = litresValue
-        log.totalCostLKR = totalValue
-        log.costPerLitre = totalValue / litresValue
-        log.kmPerLitre = efficiency
-
-        vehicle.currentMileage = max(vehicle.currentMileage, mileageValue)
-
-        do {
-            try context.save()
-            onSaved()
-            isSaving = false
-            dismiss()
-        } catch {
-            errorText = "Could not save fuel log."
-            isSaving = false
-        }
+        onSaved()
+        isSaving = false
+        dismiss()
     }
 
     private func latestFuelLogMileage(for vehicleId: UUID) -> Double {

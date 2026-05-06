@@ -2,7 +2,7 @@
 //  AddDriverView.swift
 //  FleetIQ
 //
-//  Created by GitHub Copilot on 2026-04-12.
+//  Created by Vihanga Deshan Sammandapperuma on 2026-04-12.
 //
 
 import SwiftUI
@@ -144,9 +144,9 @@ struct AddDriverView: View {
                 try await firestoreService.updateVehicle(
                     fleetId: authViewModel.fleetId,
                     vehicleId: assignedVehicleId.uuidString,
-                    data: ["assignedDriverId": normalizedName]
+                    data: ["assignedDriverId": driverId.uuidString]
                 )
-                vehicle.assignedDriverId = normalizedName
+                vehicle.assignedDriverId = driverId.uuidString
 
                 try await firestoreService.updateDriverUserAssignment(
                     userId: driverId.uuidString,

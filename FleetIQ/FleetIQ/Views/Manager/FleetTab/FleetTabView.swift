@@ -17,6 +17,9 @@ struct FleetTabView: View {
     @State private var searchText = ""
     @State private var selectedFilter = "All"
     @State private var showAddVehicle = false
+    @State private var drivers: [FleetDriverUser] = []
+
+    private let firestoreService = FirestoreService.shared
 
     // MARK: - Constants
     let filters = ["All", "Active", "Due Soon", "Overdue"]
@@ -98,7 +101,7 @@ struct FleetTabView: View {
                     } else {
                         LazyVStack(spacing: 8) {
                             ForEach(filteredVehicles, id: \.id) { vehicle in
-                                VehicleCardView(vehicle: vehicle)
+                                VehicleCardView(vehicle: vehicle, drivers: drivers)
                                     .padding(.horizontal, 12)
                             }
                         }
@@ -146,6 +149,11 @@ struct FleetTabView: View {
                 AddVehicleView()
                     .environmentObject(fleetViewModel)
                     .environmentObject(authViewModel)
+            }
+            .task(id: authViewModel.fleetId) {
+                let fleetId = authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !fleetId.isEmpty else { return }
+                drivers = (try? await firestoreService.fetchFleetDriverUsers(fleetId: fleetId)) ?? []
             }
         }
     }

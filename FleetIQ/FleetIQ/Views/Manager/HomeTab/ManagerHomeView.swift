@@ -22,6 +22,8 @@ struct ManagerHomeView: View {
     @State private var showFaults = false
     @State private var showAnalytics = false
     @State private var showUserProfile = false
+    @State private var showNotifications = false
+    @State private var selectedAlertVehicle: VehicleEntity? = nil
 
     @State private var heroPage = 0
     @State private var monthlySpend: Double = 0
@@ -29,6 +31,28 @@ struct ManagerHomeView: View {
     @State private var bestVehicleRegistration = "-"
     @State private var openFaultCount = 0
     @State private var expiringInsuranceCount = 0
+    @State private var latestCriticalMessage = "No critical alerts right now."
+    @State private var notifications: [ManagerNotificationItem] = []
+    @AppStorage("managerReadNotificationIDs") private var readNotificationIdsRaw: String = ""
+
+    // Bug 2: Today's Activity State
+    @State private var todayServiceRecords: [ServiceRecordEntity] = []
+    @State private var todayFuelLogs: [FuelLogEntity] = []
+    @State private var todayFaultReports: [FaultReportEntity] = []
+    @State private var todayTripLogs: [TripLogEntity] = []
+
+    /// Total count shown on the bell badge:
+    /// unread notifications + overdue vehicles + expiring licences.
+    private var totalAlertCount: Int {
+        let unread = notifications.filter { !$0.isRead }.count
+        let overdue = fleetViewModel.vehicles.filter {
+            fleetViewModel.vehicleStatus($0) == "Overdue"
+        }.count
+        let expiring = fleetViewModel.vehicles.filter {
+            isLicenceExpiringSoon($0)
+        }.count
+        return unread + overdue + expiring
+    }
 
     // MARK: - Greeting
     var greeting: String {
@@ -52,14 +76,14 @@ struct ManagerHomeView: View {
     }
 
     var managerInitials: String {
-        let name = authViewModel.currentUID
+        let name = authViewModel.currentUserName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return "M" }
         let parts = name.split(separator: " ")
-
         if parts.count >= 2 {
-            return String(parts[0].prefix(1)) + String(parts[1].prefix(1))
+            return String(parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
         }
-
-        return "M"
+        return String(name.prefix(2)).uppercased()
     }
 
     // MARK: - Body
@@ -100,13 +124,19 @@ struct ManagerHomeView: View {
                     .environmentObject(fleetViewModel)
             }
             .sheet(isPresented: $showFaults) {
-                FaultsTabView()
+                FaultListView()
                     .environmentObject(authViewModel)
+                    .environmentObject(fleetViewModel)
             }
             .sheet(isPresented: $showAnalytics) {
                 NavigationStack {
                     AnalyticsView()
                         .environmentObject(fleetViewModel)
+                }
+            }
+            .sheet(isPresented: $showNotifications) {
+                NavigationStack {
+                    managerNotificationsView
                 }
             }
             .fullScreenCover(isPresented: $showUserProfile) {
@@ -118,20 +148,53 @@ struct ManagerHomeView: View {
             .onAppear {
                 loadHomeMetrics()
             }
+            .onChange(of: fleetViewModel.vehicles.count) { _, _ in
+                loadHomeMetrics()
+            }
+            .onChange(of: fleetViewModel.vehicles) { _, _ in
+                loadHomeMetrics()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)) { _ in
+                loadHomeMetrics()
+            }
         }
     }
 
     // MARK: - Home Header
     var homeHeader: some View {
         HStack {
-            Text("Hi Manager")
-                .font(.system(size: 22, weight: .bold))
+            Text({
+                let name = authViewModel.currentUserName
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let first = name.split(separator: " ").first.map(String.init) ?? ""
+                return "Hi \(first.isEmpty ? "Manager" : first)"
+            }())
+            .font(.title.weight(.bold))
 
             Spacer()
 
-            Image(systemName: "bell.fill")
-                .font(.title3)
+            Button {
+                showNotifications = true
+            } label: {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "bell.fill")
+                        .font(.title3)
+
+                    if totalAlertCount > 0 {
+                        Text("\(min(totalAlertCount, 9))")
+                            .font(.caption2.weight(.bold))
+                            .foregroundColor(.white)
+                            .padding(4)
+                            .background(Color.statusOverdue)
+                            .clipShape(Circle())
+                            .offset(x: 8, y: -8)
+                    }
+                }
                 .padding(.trailing, 10)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("View notifications")
+            .accessibilityHint("Opens recent critical alerts and updates")
 
             Button {
                 showUserProfile = true
@@ -169,12 +232,12 @@ struct ManagerHomeView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("FLEET STATUS")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundColor(.white.opacity(0.55))
                         .tracking(0.5)
 
                     Text("\(fleetViewModel.vehicles.count) Vehicles")
-                        .font(.system(size: 22, weight: .bold))
+                        .font(.title3.weight(.bold))
                         .foregroundColor(.white)
                 }
 
@@ -182,7 +245,7 @@ struct ManagerHomeView: View {
 
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("MONTHLY SPEND")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundColor(.white.opacity(0.6))
                         .tracking(0.5)
 
@@ -216,6 +279,7 @@ struct ManagerHomeView: View {
             }
             .padding(.top, 8)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(14)
         .background(
             LinearGradient(
@@ -232,12 +296,12 @@ struct ManagerHomeView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("EFFICIENCY")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundColor(.white.opacity(0.65))
                         .tracking(0.5)
 
                     Text("\(String(format: "%.1f", averageEfficiency)) km/L")
-                        .font(.system(size: 30, weight: .bold))
+                        .font(.title.weight(.bold))
                         .foregroundColor(.white)
                 }
 
@@ -245,7 +309,7 @@ struct ManagerHomeView: View {
 
                 VStack(alignment: .trailing, spacing: 3) {
                     Text("BEST VEHICLE")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundColor(.white.opacity(0.65))
                         .tracking(0.5)
 
@@ -258,13 +322,19 @@ struct ManagerHomeView: View {
             Spacer()
 
             HStack(alignment: .bottom, spacing: 8) {
-                ForEach(0..<7, id: \.self) { index in
+                ForEach(last7MonthsSpend().indices, id: \ .self) { index in
+                    let values = last7MonthsSpend()
+                    let maxVal = values.max() ?? 1
+                    let barHeight = maxVal > 0
+                        ? CGFloat(22) + CGFloat(48) * CGFloat(values[index]) / CGFloat(maxVal)
+                        : 22
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.white.opacity(0.25 + Double(index) * 0.07))
-                        .frame(width: 26, height: CGFloat(22 + index * 7))
+                        .fill(Color.white.opacity(index == values.count - 1 ? 0.9 : 0.35))
+                        .frame(width: 26, height: barHeight)
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(14)
         .background(
             LinearGradient(
@@ -276,15 +346,50 @@ struct ManagerHomeView: View {
         .cornerRadius(14)
     }
 
+    /// Returns total spending for each of the last 7 months, oldest first.
+    private func last7MonthsSpend() -> [Double] {
+        let calendar = Calendar.current
+        return (0..<7).reversed().map { monthsAgo -> Double in
+            guard let targetDate = calendar.date(
+                byAdding: .month, value: -monthsAgo, to: Date()),
+                  let startOfMonth = calendar.date(
+                    from: calendar.dateComponents([.year, .month], from: targetDate)),
+                  let endOfMonth = calendar.date(
+                    byAdding: .month, value: 1, to: startOfMonth)
+            else { return 0 }
+
+            let servicePredicate = NSPredicate(
+                format: "date >= %@ AND date < %@",
+                startOfMonth as NSDate, endOfMonth as NSDate)
+            let fuelPredicate = NSPredicate(
+                format: "date >= %@ AND date < %@",
+                startOfMonth as NSDate, endOfMonth as NSDate)
+
+            let serviceReq = ServiceRecordEntity.fetchRequest()
+            serviceReq.predicate = servicePredicate
+            let fuelReq = FuelLogEntity.fetchRequest()
+            fuelReq.predicate = fuelPredicate
+
+            let serviceTotal = (try? context.fetch(serviceReq))?.reduce(0) { $0 + $1.costLKR } ?? 0
+            let fuelTotal = (try? context.fetch(fuelReq))?.reduce(0) { $0 + $1.totalCostLKR } ?? 0
+            return serviceTotal + fuelTotal
+        }
+    }
+
     var riskHeroCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("→  \(openFaultCount) VEHICLE FAULT")
-                .font(.system(size: 26, weight: .bold))
+                .font(.title2.weight(.bold))
                 .foregroundColor(.white)
 
             Text("→  \(expiringInsuranceCount) INSURANCE WILL EXPIRE SOON")
-                .font(.system(size: 26, weight: .bold))
+                .font(.title2.weight(.bold))
                 .foregroundColor(.white)
+
+            Text(latestCriticalMessage)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(14)
@@ -357,7 +462,7 @@ struct ManagerHomeView: View {
                 .frame(width: 7, height: 7)
 
             Text("\(count) \(label)")
-                .font(.system(size: 10))
+                .font(.caption)
                 .foregroundColor(.white.opacity(0.65))
         }
     }
@@ -367,13 +472,15 @@ struct ManagerHomeView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Urgent Alerts")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
 
                 Spacer()
 
-                Text("See All")
-                    .font(.system(size: 12))
-                    .foregroundColor(.blue)
+                Button("See All") {
+                    showFaults = true
+                }
+                .font(.caption)
+                .foregroundColor(.blue)
             }
             .padding(.top, 14)
 
@@ -385,13 +492,20 @@ struct ManagerHomeView: View {
                 isLicenceExpiringSoon($0)
             }
 
-            if overdue.isEmpty && expiring.isEmpty {
+            let priorityNotifications = Array(
+                notifications
+                    .filter { !$0.isRead }
+                    .sorted { $0.date > $1.date }
+                    .prefix(2)
+            )
+
+            if overdue.isEmpty && expiring.isEmpty && priorityNotifications.isEmpty {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.statusActive)
 
                     Text("No urgent alerts today")
-                        .font(.system(size: 13))
+                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 .padding(12)
@@ -400,27 +514,56 @@ struct ManagerHomeView: View {
                 .cornerRadius(12)
                 .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
             } else {
-                ForEach(overdue.prefix(2), id: \.id) { vehicle in
-                    alertRow(
-                        icon: "exclamationmark.triangle.fill",
-                        iconBg: Color.chipRedBg,
-                        iconColour: Color.chipRedText,
-                        title: "Service Overdue - \(vehicle.registration ?? "")",
-                        subtitle: "\(abs(fleetViewModel.daysUntilService(vehicle))) days past due"
-                    )
+                // Fault / notification alerts → tap to open Fault Reports
+                ForEach(priorityNotifications) { item in
+                    Button {
+                        showFaults = true
+                    } label: {
+                        alertRow(
+                            icon: item.level.icon,
+                            iconBg: item.level.background,
+                            iconColour: item.level.color,
+                            title: item.title,
+                            subtitle: item.subtitle
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
 
+                // Overdue service alerts → tap to open vehicle detail
+                ForEach(overdue.prefix(2), id: \.id) { vehicle in
+                    NavigationLink(destination: VehicleDetailView(vehicle: vehicle)
+                                    .environmentObject(authViewModel)
+                                    .environmentObject(fleetViewModel)) {
+                        alertRow(
+                            icon: "exclamationmark.triangle.fill",
+                            iconBg: Color.chipRedBg,
+                            iconColour: Color.chipRedText,
+                            title: "Service Overdue - \(vehicle.registration ?? "")",
+                            subtitle: "\(abs(fleetViewModel.daysUntilService(vehicle))) days past due"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                // Expiring licence alerts → tap to open vehicle detail
                 ForEach(expiring.prefix(2), id: \.id) { vehicle in
-                    alertRow(
-                        icon: "doc.fill",
-                        iconBg: Color.chipOrangeBg,
-                        iconColour: Color.chipOrangeText,
-                        title: "Licence Expiring - \(vehicle.registration ?? "")",
-                        subtitle: licenceDaysText(vehicle)
-                    )
+                    NavigationLink(destination: VehicleDetailView(vehicle: vehicle)
+                                    .environmentObject(authViewModel)
+                                    .environmentObject(fleetViewModel)) {
+                        alertRow(
+                            icon: "doc.fill",
+                            iconBg: Color.chipOrangeBg,
+                            iconColour: Color.chipOrangeText,
+                            title: "Licence Expiring - \(vehicle.registration ?? "")",
+                            subtitle: licenceDaysText(vehicle)
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
+        
     }
 
     /// Builds a single urgent alert row.
@@ -440,7 +583,7 @@ struct ManagerHomeView: View {
     ) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .font(.title3)
                 .foregroundColor(iconColour)
                 .frame(width: 34, height: 34)
                 .background(iconBg)
@@ -448,17 +591,17 @@ struct ManagerHomeView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
 
                 Text(subtitle)
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundColor(.secondary)
             }
 
             Spacer()
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundColor(Color(.systemGray3))
         }
         .padding(12)
@@ -471,7 +614,7 @@ struct ManagerHomeView: View {
     var quickActionsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Quick Actions")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .padding(.top, 14)
 
             LazyVGrid(
@@ -535,7 +678,7 @@ struct ManagerHomeView: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 18))
+                    .font(.title3)
                     .foregroundColor(.navyPrimary)
                     .frame(width: 36, height: 36)
                     .background(iconBg)
@@ -543,17 +686,22 @@ struct ManagerHomeView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
 
                     Text(subtitle)
-                        .font(.system(size: 10))
+                        .font(.caption)
                         .foregroundColor(.secondary)
+                        .lineLimit(2)
+                        .frame(minHeight: 28, alignment: .topLeading)
                 }
 
                 Spacer()
             }
             .padding(12)
+            .frame(minHeight: 94)
             .background(Color.white)
             .cornerRadius(12)
             .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
@@ -567,25 +715,122 @@ struct ManagerHomeView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Today's Activity")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
 
                 Spacer()
 
-                Text("All Records")
-                    .font(.system(size: 12))
-                    .foregroundColor(.blue)
+                Button("All Records") {
+                    showRecords = true
+                }
+                .font(.caption)
+                .foregroundColor(.blue)
             }
             .padding(.top, 14)
 
-            Text("No activity logged today")
-                .font(.system(size: 13))
-                .foregroundColor(.secondary)
+            let totalToday = todayServiceRecords.count
+                + todayFuelLogs.count
+                + todayFaultReports.count
+                + todayTripLogs.count
+
+            if totalToday == 0 {
+                HStack(spacing: 8) {
+                    Image(systemName: "moon.zzz")
+                        .foregroundColor(.secondary)
+                    Text("No activity logged today")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
                 .background(Color.white)
                 .cornerRadius(12)
                 .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(todayFaultReports.prefix(2)), id: \.id) { fault in
+                        activityRow(
+                            icon: "exclamationmark.triangle.fill",
+                            iconColor: .statusOverdue,
+                            title: "Fault reported",
+                            detail: fault.descriptionText ?? "Fault submitted",
+                            time: fault.createdAt
+                        )
+                        Divider().padding(.leading, 46)
+                    }
+                    ForEach(Array(todayServiceRecords.prefix(2)), id: \.id) { record in
+                        activityRow(
+                            icon: "wrench.and.screwdriver.fill",
+                            iconColor: .navyPrimary,
+                            title: record.serviceType ?? "Service logged",
+                            detail: record.garageName ?? "Service record saved",
+                            time: record.date
+                        )
+                        Divider().padding(.leading, 46)
+                    }
+                    ForEach(Array(todayFuelLogs.prefix(2)), id: \.id) { log in
+                        activityRow(
+                            icon: "fuelpump.fill",
+                            iconColor: .statusDueSoon,
+                            title: "Fuel fill-up logged",
+                            detail: String(format: "%.1f L · LKR %.0f",
+                                          log.litres, log.totalCostLKR),
+                            time: log.date
+                        )
+                        Divider().padding(.leading, 46)
+                    }
+                    ForEach(Array(todayTripLogs.prefix(2)), id: \.id) { trip in
+                        activityRow(
+                            icon: "road.lanes",
+                            iconColor: .driverGreen,
+                            title: trip.purpose?.isEmpty == false
+                                ? trip.purpose! : "Trip logged",
+                            detail: String(format: "%.1f km · %@",
+                                          trip.distanceKm,
+                                          trip.destination ?? "-"),
+                            time: trip.date
+                        )
+                    }
+                }
+                .background(Color.white)
+                .cornerRadius(12)
+                .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+            }
         }
+    }
+
+    private func activityRow(
+        icon: String,
+        iconColor: Color,
+        title: String,
+        detail: String,
+        time: Date?
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(iconColor)
+                .frame(width: 26, height: 26)
+                .background(iconColor.opacity(0.12))
+                .clipShape(Circle())
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if let time {
+                Text(time.formatted(date: .omitted, time: .shortened))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Helpers
@@ -617,6 +862,10 @@ struct ManagerHomeView: View {
     private func loadHomeMetrics() {
         let serviceRequest = ServiceRecordEntity.fetchRequest()
         let fuelRequest = FuelLogEntity.fetchRequest()
+        let faultRequest = FaultReportEntity.fetchRequest()
+
+        let faults = (try? context.fetch(faultRequest)) ?? []
+        let activeFaults = faults.filter { ($0.status ?? "open") != "resolved" }
 
         do {
             let serviceRecords = try context.fetch(serviceRequest)
@@ -660,16 +909,285 @@ struct ManagerHomeView: View {
             bestVehicleRegistration = "-"
         }
 
-        let openFaultRequest = FaultReportEntity.fetchRequest()
-        openFaultRequest.predicate = NSPredicate(format: "status != %@", "resolved")
-        openFaultCount = (try? context.count(for: openFaultRequest)) ?? 0
+        openFaultCount = activeFaults.count
 
         expiringInsuranceCount = fleetViewModel.vehicles.filter { vehicle in
             guard let expiry = vehicle.insuranceExpiry else { return false }
             let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
             return days >= 0 && days <= 30
         }.count
+
+        rebuildNotifications(from: activeFaults)
+        loadTodayActivity()   // Bug 2: Load today's activity at end
     }
+
+    // Bug 2: Load today's activity
+    private func loadTodayActivity() {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: Date())
+        guard let endOfDay = calendar.date(
+            byAdding: .day, value: 1, to: startOfDay) else { return }
+
+        let dateRange = NSPredicate(
+            format: "date >= %@ AND date < %@",
+            startOfDay as NSDate,
+            endOfDay as NSDate)
+
+        let serviceReq = ServiceRecordEntity.fetchRequest()
+        serviceReq.predicate = dateRange
+        serviceReq.sortDescriptors = [
+            NSSortDescriptor(key: "date", ascending: false)]
+        todayServiceRecords = (try? context.fetch(serviceReq)) ?? []
+
+        let fuelReq = FuelLogEntity.fetchRequest()
+        fuelReq.predicate = dateRange
+        fuelReq.sortDescriptors = [
+            NSSortDescriptor(key: "date", ascending: false)]
+        todayFuelLogs = (try? context.fetch(fuelReq)) ?? []
+
+        let faultReq = FaultReportEntity.fetchRequest()
+        faultReq.predicate = NSPredicate(
+            format: "createdAt >= %@ AND createdAt < %@",
+            startOfDay as NSDate,
+            endOfDay as NSDate)
+        faultReq.sortDescriptors = [
+            NSSortDescriptor(key: "createdAt", ascending: false)]
+        todayFaultReports = (try? context.fetch(faultReq)) ?? []
+
+        let tripReq = TripLogEntity.fetchRequest()
+        tripReq.predicate = dateRange
+        tripReq.sortDescriptors = [
+            NSSortDescriptor(key: "date", ascending: false)]
+        todayTripLogs = (try? context.fetch(tripReq)) ?? []
+    }
+
+    private func rebuildNotifications(from activeFaults: [FaultReportEntity]) {
+        var items: [ManagerNotificationItem] = []
+
+        let sortedFaults = activeFaults.sorted {
+            ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
+        }
+
+        for fault in sortedFaults.prefix(10) {
+            let registration = registrationForFault(fault)
+            let message = (fault.descriptionText ?? "Fault reported")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let urgency = (fault.urgency ?? "medium").lowercased()
+            let titlePrefix = (urgency == "high" || urgency == "critical") ? "Critical fault" : "Fault report"
+
+            items.append(
+                ManagerNotificationItem(
+                    id: fault.id?.uuidString ?? UUID().uuidString,
+                    title: "\(titlePrefix): \(registration)",
+                    subtitle: message.isEmpty ? "Driver submitted a fault report." : message,
+                    date: fault.createdAt ?? Date(),
+                    level: (urgency == "high" || urgency == "critical") ? .danger : .info
+                )
+            )
+        }
+
+        for vehicle in fleetViewModel.vehicles {
+            guard let expiry = vehicle.licenceExpiry else {
+                continue
+            }
+
+            let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+            guard days >= 0 && days <= 30 else {
+                continue
+            }
+
+            let registration = vehicle.registration?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanRegistration = (registration?.isEmpty == false) ? registration! : "Vehicle"
+
+            items.append(
+                ManagerNotificationItem(
+                    id: "licence-\(vehicle.id?.uuidString ?? UUID().uuidString)",
+                    title: "Licence expiry: \(cleanRegistration)",
+                    subtitle: "Revenue licence expires in \(days) day(s).",
+                    date: expiry,
+                    level: days <= 7 ? .danger : .warning
+                )
+            )
+        }
+
+        let readIds = readNotificationIDs
+        notifications = items
+            .sorted { $0.date > $1.date }
+            .map { item in
+                var mutable = item
+                mutable.isRead = readIds.contains(item.id)
+                return mutable
+            }
+
+        latestCriticalMessage = notifications
+            .first(where: { !$0.isRead })?.subtitle
+            ?? notifications.first?.subtitle
+            ?? "No critical alerts right now."
+    }
+
+    private func registrationForFault(_ fault: FaultReportEntity) -> String {
+        guard let vehicleId = fault.vehicleId,
+              let vehicle = fleetViewModel.vehicles.first(where: { $0.id == vehicleId }),
+              let registration = vehicle.registration?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !registration.isEmpty else {
+            return "Vehicle"
+        }
+
+        return registration
+    }
+
+    private var managerNotificationsView: some View {
+        List {
+            if notifications.isEmpty {
+                ContentUnavailableView(
+                    "No Notifications",
+                    systemImage: "bell.slash",
+                    description: Text("New fault reports and expiring licence alerts will appear here.")
+                )
+            } else {
+                ForEach(notifications) { item in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(item.title)
+                                .font(.subheadline.weight(.semibold))
+
+                            Spacer()
+
+                            if !item.isRead {
+                                Text("NEW")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(item.level.color)
+                                    .clipShape(Capsule())
+                            }
+                        }
+
+                        Text(item.subtitle)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+
+                        HStack {
+                            Text(item.date.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption2)
+                                .foregroundColor(item.level.color)
+
+                            Spacer()
+
+                            if !item.isRead {
+                                Button("Mark as read") {
+                                    markAsRead(item.id)
+                                }
+                                .font(.caption2.weight(.semibold))
+                            }
+                        }
+                    }
+                    .padding(10)
+                    .background(item.level.background.opacity(item.isRead ? 0.35 : 0.8))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .listRowBackground(Color.clear)
+                }
+            }
+        }
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Mark all") {
+                    markAllAsRead()
+                }
+                .disabled(notifications.allSatisfy { $0.isRead })
+            }
+        }
+    }
+
+    private var readNotificationIDs: Set<String> {
+        Set(
+            readNotificationIdsRaw
+                .split(separator: "|")
+                .map(String.init)
+        )
+    }
+
+    private func markAsRead(_ id: String) {
+        var ids = readNotificationIDs
+        ids.insert(id)
+        readNotificationIdsRaw = ids.sorted().joined(separator: "|")
+
+        notifications = notifications.map { item in
+            var mutable = item
+            if item.id == id {
+                mutable.isRead = true
+            }
+            return mutable
+        }
+
+        latestCriticalMessage = notifications
+            .first(where: { !$0.isRead })?.subtitle
+            ?? notifications.first?.subtitle
+            ?? "No critical alerts right now."
+    }
+
+    private func markAllAsRead() {
+        let ids = Set(notifications.map(\.id))
+        readNotificationIdsRaw = ids.sorted().joined(separator: "|")
+        notifications = notifications.map { item in
+            var mutable = item
+            mutable.isRead = true
+            return mutable
+        }
+        latestCriticalMessage = notifications.first?.subtitle ?? "No critical alerts right now."
+    }
+}
+
+private struct ManagerNotificationItem: Identifiable {
+    enum Level {
+        case info
+        case warning
+        case danger
+
+        var color: Color {
+            switch self {
+            case .info:
+                return .navyPrimary
+            case .warning:
+                return .statusDueSoon
+            case .danger:
+                return .statusOverdue
+            }
+        }
+
+        var background: Color {
+            switch self {
+            case .info:
+                return Color(hex: "E8F0FB")
+            case .warning:
+                return Color(hex: "FFF8E1")
+            case .danger:
+                return Color(hex: "FFEAEA")
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .info:
+                return "info.circle.fill"
+            case .warning:
+                return "exclamationmark.circle.fill"
+            case .danger:
+                return "exclamationmark.triangle.fill"
+            }
+        }
+    }
+
+    let id: String
+    let title: String
+    let subtitle: String
+    let date: Date
+    let level: Level
+    var isRead: Bool = false
 }
 
 #Preview {

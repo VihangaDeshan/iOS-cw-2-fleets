@@ -1,14 +1,14 @@
 //
-//  ManagerSettingsView.swift
+//  DriverSettingsView.swift
 //  FleetIQ
 //
-//  Created by Vihanga Deshan Sammandapperuma on 2026-04-12.
+//  Created by Vihanga Deshan Sammandapperuma on 2026-04-13.
 //
 
 import SwiftUI
 
-// MARK: - Manager Settings View
-struct ManagerSettingsView: View {
+// MARK: - Driver Settings View
+struct DriverSettingsView: View {
     @EnvironmentObject private var authViewModel: AuthViewModel
 
     @AppStorage("faceIDEnabled") private var faceIDEnabled = false
@@ -20,7 +20,8 @@ struct ManagerSettingsView: View {
                 Section("ACCOUNT") {
                     infoRow(title: "Role", value: authViewModel.userRole.capitalized)
                     infoRow(title: "Fleet ID", value: authViewModel.fleetId)
-                    infoRow(title: "User ID", value: authViewModel.currentUID)
+                    infoRow(title: "Driver ID", value: authViewModel.currentUID)
+                    infoRow(title: "Assigned Vehicle", value: authViewModel.assignedVehicleId)
                 }
 
                 Section("SECURITY") {
@@ -30,6 +31,11 @@ struct ManagerSettingsView: View {
                                 isUnlocked = true
                             }
                         }
+                }
+
+                Section("ABOUT") {
+                    infoRow(title: "App", value: "FleetIQ")
+                    infoRow(title: "Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "-")
                 }
 
                 Section {
@@ -51,10 +57,15 @@ struct ManagerSettingsView: View {
             Text(title)
                 .foregroundColor(.secondary)
             Spacer()
-            Text(value.isEmpty ? "-" : value)
+            Text(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : value)
                 .fontWeight(.semibold)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
     }
+}
+
+#Preview {
+    DriverSettingsView()
+        .environmentObject(AuthViewModel())
 }

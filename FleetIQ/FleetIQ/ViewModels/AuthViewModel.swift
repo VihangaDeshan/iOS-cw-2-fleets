@@ -7,26 +7,9 @@
 
 import Foundation
 import Combine
+import FirebaseCore
 import FirebaseAuth
 import FirebaseFirestore
-import FirebaseCore
-
-private func ensureFirebaseConfiguredForAuthViewModel() {
-    if FirebaseApp.app() != nil {
-        return
-    }
-
-    if Thread.isMainThread {
-        FirebaseApp.configure()
-        return
-    }
-
-    DispatchQueue.main.sync {
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure()
-        }
-    }
-}
 
 // MARK: - Auth View Model
 @MainActor
@@ -35,23 +18,41 @@ final class AuthViewModel: ObservableObject {
     @Published var isAuthenticated: Bool = false
     @Published var userRole: String = ""
     @Published var currentUID: String = ""
+    @Published var currentUserName: String = ""
     @Published var fleetId: String = ""
+    @Published var assignedVehicleId: String = ""
     @Published var errorMessage: String = ""
 
     // MARK: - Private Properties
     private let authService: AuthService
     private let firestoreProvider: () -> Firestore
     private var authStateHandle: AuthStateDidChangeListenerHandle?
+    private var didStartAuthStateListener: Bool = false
 
     // MARK: - Initializer
-    /// Creates the AuthViewModel and starts listening to Firebase authentication state changes.
+    /// Creates the AuthViewModel with lazy Firebase access.
+    /// Auth state listening is NOT started automatically; call startAuthStateListenerIfNeeded()
+    /// after FirebaseApp.configure() has completed.
     init(
         authService: AuthService? = nil,
-        firestoreProvider: @escaping () -> Firestore = { Firestore.firestore() }
+        firestoreProvider: @escaping () -> Firestore = {
+            guard FirebaseApp.app() != nil else {
+                fatalError("Firebase app has not been configured. Call FirebaseApp.configure() in app initialization.")
+            }
+            return Firestore.firestore()
+        }
     ) {
-        ensureFirebaseConfiguredForAuthViewModel()
         self.authService = authService ?? AuthService()
         self.firestoreProvider = firestoreProvider
+    }
+
+    /// Starts Firebase Auth state observation after app launch has configured Firebase.
+    func startAuthStateListenerIfNeeded() {
+        guard !didStartAuthStateListener else {
+            return
+        }
+
+        didStartAuthStateListener = true
         startAuthStateListener()
     }
 
@@ -149,7 +150,6 @@ final class AuthViewModel: ObservableObject {
     // MARK: - Private Methods
     /// Starts Firebase Auth state observation for login and logout updates.
     private func startAuthStateListener() {
-        ensureFirebaseConfiguredForAuthViewModel()
         authStateHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             guard let self else {
                 return
@@ -188,8 +188,20 @@ final class AuthViewModel: ObservableObject {
 
         for attempt in 1...maxAttempts {
             do {
-                let resolvedRole = try await authService.fetchUserRole(uid: uid)
-                let resolvedFleetId = try await fetchFleetId(uid: uid)
+                let userData = try await fetchUserDocument(uid: uid)
+
+                let resolvedRole = (userData["role"] as? String ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                let resolvedFleetId = ((userData["fleetId"] as? String)
+                    ?? (userData["fleetID"] as? String)
+                    ?? (userData["fleetName"] as? String)
+                    ?? "")
+                let resolvedName = (userData["name"] as? String ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let resolvedAssignedVehicleId = (userData["assignedVehicleId"] as? String ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
                 let normalizedRole = resolvedRole.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 let normalizedFleetId = resolvedFleetId.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -203,6 +215,8 @@ final class AuthViewModel: ObservableObject {
 
                 fleetId = normalizedFleetId
                 userRole = normalizedRole
+                currentUserName = resolvedName
+                assignedVehicleId = resolvedAssignedVehicleId
                 errorMessage = ""
                 return
             } catch {
@@ -225,6 +239,20 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
+    /// Fetches full user profile data from users/{uid}.
+    private func fetchUserDocument(uid: String) async throws -> [String: Any] {
+        let document = try await firestoreProvider().collection("users").document(uid).getDocument()
+        guard let data = document.data() else {
+            throw NSError(
+                domain: "AuthViewModel",
+                code: -12,
+                userInfo: [NSLocalizedDescriptionKey: "User profile not found."]
+            )
+        }
+
+        return data
+    }
+
     /// Fetches the fleetId field from users/{uid} in Firestore.
     private func fetchFleetId(uid: String) async throws -> String {
         let document = try await firestoreProvider().collection("users").document(uid).getDocument()
@@ -240,6 +268,8 @@ final class AuthViewModel: ObservableObject {
         isAuthenticated = false
         userRole = ""
         currentUID = ""
+        currentUserName = ""
         fleetId = ""
+        assignedVehicleId = ""
     }
 }

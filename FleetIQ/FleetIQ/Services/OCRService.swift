@@ -42,29 +42,39 @@ final class OCRService {
             throw OCRError.invalidImage
         }
 
+        // Dispatch onto a background queue — VNImageRequestHandler.perform() is
+        // synchronous and must NOT run on the MainActor or cooperative thread pool.
         return try await withCheckedThrowingContinuation { continuation in
-            let request = VNRecognizeTextRequest { request, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
+            Self.visionQueue.async {
+                let request = VNRecognizeTextRequest { request, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    let observations = request.results as? [VNRecognizedTextObservation] ?? []
+                    let lines = observations.compactMap { $0.topCandidates(1).first?.string }
+                    continuation.resume(returning: lines)
                 }
 
-                let observations = request.results as? [VNRecognizedTextObservation] ?? []
-                let lines = observations.compactMap { $0.topCandidates(1).first?.string }
-                continuation.resume(returning: lines)
-            }
+                request.recognitionLevel = .accurate
+                request.usesLanguageCorrection = true
 
-            request.recognitionLevel = .accurate
-            request.usesLanguageCorrection = true
-
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-            do {
-                try handler.perform([request])
-            } catch {
-                continuation.resume(throwing: error)
+                let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+                do {
+                    try handler.perform([request])
+                } catch {
+                    continuation.resume(throwing: error)
+                }
             }
         }
     }
+
+    // Serial background queue for Vision requests — keeps them off the main thread.
+    private static let visionQueue = DispatchQueue(
+        label: "com.fleetiq.ocr.vision",
+        qos: .userInitiated
+    )
 
     // MARK: - Invoice Field Extraction
 

@@ -12,6 +12,7 @@ import CoreData
 struct VehicleCardView: View {
     // MARK: - Stored Properties
     let vehicle: VehicleEntity
+    let drivers: [FleetDriverUser]
     @EnvironmentObject var fleetViewModel: FleetViewModel
     @EnvironmentObject var authViewModel: AuthViewModel
 
@@ -66,6 +67,36 @@ struct VehicleCardView: View {
         }
     }
 
+    var assignedDriverDisplayName: String {
+        let raw = (vehicle.assignedDriverId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !raw.isEmpty else {
+            return "Unassigned"
+        }
+
+        // 1. Try direct userId match (UUID or Firebase Auth UID).
+        if let matched = drivers.first(where: { $0.userId == raw }),
+           !matched.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return matched.name
+        }
+
+        // 2. Try vehicle-assignment-based match.
+        if let vehicleId = vehicle.id?.uuidString,
+           let matched = drivers.first(where: { $0.assignedVehicleId == vehicleId }),
+           !matched.name.isEmpty {
+            return matched.name
+        }
+
+        // 3. Hide raw IDs from the user.
+        if raw.count > 12 && !raw.contains(" ") {
+            return "Assigned Driver"
+        }
+
+        // 4. Legacy plain-name string.
+        return raw
+    }
+
     // MARK: - Body
     var body: some View {
         VStack(spacing: 0) {
@@ -96,12 +127,12 @@ struct VehicleCardView: View {
                     .fill(Color.navyPrimary)
                     .frame(width: 24, height: 24)
                     .overlay(
-                        Text(initials(vehicle.assignedDriverId ?? "?"))
+                        Text(initials(assignedDriverDisplayName))
                             .font(.system(size: 9, weight: .bold))
                             .foregroundColor(.white)
                     )
 
-                Text(vehicle.assignedDriverId ?? "Unassigned")
+                Text(assignedDriverDisplayName)
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
 
@@ -142,6 +173,9 @@ struct VehicleCardView: View {
         .background(Color.white)
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(vehicle.registration ?? ""), status \(status), \(daysText)")
     }
 
     // MARK: - Helpers
@@ -173,7 +207,7 @@ struct VehicleCardView: View {
     sample.assignedDriverId = "Kamal Silva"
 
     return NavigationStack {
-        VehicleCardView(vehicle: sample)
+        VehicleCardView(vehicle: sample, drivers: [])
             .environmentObject(AuthViewModel())
             .environmentObject(FleetViewModel())
             .padding()
