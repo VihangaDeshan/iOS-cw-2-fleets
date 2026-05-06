@@ -122,7 +122,7 @@ class FleetViewModel: ObservableObject {
         assignedDriverName: String?,
         assignedDriverUserId: String?,
         fleetId: String
-    ) async {
+    ) async -> String? {
         errorMessage = ""
         isLoading = true
 
@@ -185,13 +185,17 @@ class FleetViewModel: ObservableObject {
                     vehicleId: newId.uuidString
                 )
             }
+            // Return the created vehicle id on success
+            fetchFromCoreData()
+            isLoading = false
+            return newId.uuidString
         } catch {
             errorMessage = error.localizedDescription
         }
-
         fetchFromCoreData()
 
         isLoading = false
+        return nil
     }
 
     // MARK: - Delete

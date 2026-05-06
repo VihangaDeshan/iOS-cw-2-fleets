@@ -478,9 +478,9 @@ struct ManagerHomeView: View {
 
                 // Overdue service alerts → tap to open vehicle detail
                 ForEach(overdue.prefix(2), id: \.id) { vehicle in
-                    Button {
-                        selectedAlertVehicle = vehicle
-                    } label: {
+                    NavigationLink(destination: VehicleDetailView(vehicle: vehicle)
+                                    .environmentObject(authViewModel)
+                                    .environmentObject(fleetViewModel)) {
                         alertRow(
                             icon: "exclamationmark.triangle.fill",
                             iconBg: Color.chipRedBg,
@@ -494,9 +494,9 @@ struct ManagerHomeView: View {
 
                 // Expiring licence alerts → tap to open vehicle detail
                 ForEach(expiring.prefix(2), id: \.id) { vehicle in
-                    Button {
-                        selectedAlertVehicle = vehicle
-                    } label: {
+                    NavigationLink(destination: VehicleDetailView(vehicle: vehicle)
+                                    .environmentObject(authViewModel)
+                                    .environmentObject(fleetViewModel)) {
                         alertRow(
                             icon: "doc.fill",
                             iconBg: Color.chipOrangeBg,
@@ -509,23 +509,7 @@ struct ManagerHomeView: View {
                 }
             }
         }
-        // Hidden NavigationLink driven by selectedAlertVehicle
-        .background(
-            Group {
-                if let vehicle = selectedAlertVehicle {
-                    NavigationLink(
-                        destination: VehicleDetailView(vehicle: vehicle)
-                            .environmentObject(authViewModel)
-                            .environmentObject(fleetViewModel),
-                        isActive: Binding(
-                            get: { selectedAlertVehicle != nil },
-                            set: { if !$0 { selectedAlertVehicle = nil } }
-                        )
-                    ) { EmptyView() }
-                    .hidden()
-                }
-            }
-        )
+        
     }
 
     /// Builds a single urgent alert row.

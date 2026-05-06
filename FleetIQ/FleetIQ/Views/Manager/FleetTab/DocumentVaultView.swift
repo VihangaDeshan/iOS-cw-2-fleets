@@ -11,7 +11,7 @@ import PhotosUI
 import UIKit
 import FirebaseFirestore
 
-// MARK: - Document Vault View
+// MARK: - Document Wallet View
 struct DocumentVaultView: View {
     let vehicle: VehicleEntity
 
@@ -56,7 +56,7 @@ struct DocumentVaultView: View {
                     }
                 }
             }
-            .navigationTitle("Document Vault")
+            .navigationTitle("Document Wallet")
             .navigationBarTitleDisplayMode(.inline)
             // Use a dedicated Bool flag — avoids conflicts with showConfirmSheet.
             .photosPicker(
@@ -124,14 +124,49 @@ struct DocumentVaultView: View {
                 }
             }
 
-            Button {
-                activeDocType = type
-                infoMessage = ""
-                showPhotosPicker = true
-            } label: {
-                Text(document == nil ? "Scan & Upload" : "Replace Document")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.navyPrimary)
+            HStack(spacing: 12) {
+                Button {
+                    activeDocType = type
+                    infoMessage = ""
+                    showPhotosPicker = true
+                } label: {
+                    Text(document == nil ? "Scan & Upload" : "Replace Document")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.navyPrimary)
+                }
+
+                // If a document exists, expose a Remove action.
+                if document != nil {
+                    Button {
+                        Task {
+                            await removeDocument(ofType: type)
+                        }
+                    } label: {
+                        Text("Remove")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.red)
+                    }
+                }
+            }
+
+            // If the document will expire soon, show a renewal prompt.
+            if let expiry = document?.expiryDate {
+                let daysUntil = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 9999
+                if daysUntil <= 30 {
+                    HStack {
+                        Text("Expires soon — renew to avoid downtime")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                        Spacer()
+                        Button("Renew") {
+                            activeDocType = type
+                            infoMessage = ""
+                            showPhotosPicker = true
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(.navyPrimary)
+                    }
+                }
             }
         }
         .padding(.vertical, 4)
@@ -231,6 +266,12 @@ struct DocumentVaultView: View {
                 docType: docType
             )
 
+            // If an existing document exists, delete the previous storage object
+            // before uploading the replacement (ensures 'replace' semantics).
+            if let existing = documentsByType[docType], existing.photoURL?.isEmpty == false {
+                try? await firestoreService.deleteStorageObject(path: storagePath)
+            }
+
             let photoURL = try await firestoreService.uploadPhoto(image, path: storagePath)
 
             let entity = documentsByType[docType] ?? DocumentEntity(context: context)
@@ -244,8 +285,18 @@ struct DocumentVaultView: View {
             // Keep existing vehicle-level expiry fields in sync where available.
             if docType == "insurance" {
                 vehicle.insuranceExpiry = pendingExpiryDate
+                try await firestoreService.updateVehicle(
+                    fleetId: authViewModel.fleetId,
+                    vehicleId: vehicleId.uuidString,
+                    data: ["insuranceExpiry": Timestamp(date: pendingExpiryDate)]
+                )
             } else if docType == "licence" {
                 vehicle.licenceExpiry = pendingExpiryDate
+                try await firestoreService.updateVehicle(
+                    fleetId: authViewModel.fleetId,
+                    vehicleId: vehicleId.uuidString,
+                    data: ["licenceExpiry": Timestamp(date: pendingExpiryDate)]
+                )
             }
 
             try context.save()
@@ -286,6 +337,64 @@ struct DocumentVaultView: View {
 
         isSaving = false
         resetPendingState()
+    }
+
+    @MainActor
+    private func removeDocument(ofType type: String) async {
+        guard let vehicleId = vehicle.id else {
+            infoMessage = "Vehicle ID is missing."
+            return
+        }
+
+        guard let entity = documentsByType[type] else {
+            infoMessage = "No document to remove."
+            return
+        }
+
+        isSaving = true
+        infoMessage = ""
+
+        let docId = "\(vehicleId.uuidString)_\(type)"
+
+        do {
+            // Delete Firestore document (if any)
+            try await firestoreService.deleteDocument(fleetId: authViewModel.fleetId, docId: docId)
+
+            // Delete stored photo; use deterministic path rather than the URL.
+            let storagePath = try firestoreService.documentPhotoPath(
+                fleetId: authViewModel.fleetId,
+                vehicleId: vehicleId.uuidString,
+                docType: type
+            )
+            try? await firestoreService.deleteStorageObject(path: storagePath)
+
+            if type == "insurance" {
+                vehicle.insuranceExpiry = nil
+                try? await firestoreService.updateVehicle(
+                    fleetId: authViewModel.fleetId,
+                    vehicleId: vehicleId.uuidString,
+                    data: ["insuranceExpiry": NSNull()]
+                )
+            } else if type == "licence" {
+                vehicle.licenceExpiry = nil
+                try? await firestoreService.updateVehicle(
+                    fleetId: authViewModel.fleetId,
+                    vehicleId: vehicleId.uuidString,
+                    data: ["licenceExpiry": NSNull()]
+                )
+            }
+
+            // Remove local Core Data entity
+            context.delete(entity)
+            try context.save()
+
+            infoMessage = "Document removed."
+            loadDocuments()
+        } catch {
+            infoMessage = "Failed to remove document: \(error.localizedDescription)"
+        }
+
+        isSaving = false
     }
 
     private func loadDocuments() {

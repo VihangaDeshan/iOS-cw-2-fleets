@@ -82,6 +82,11 @@ final class VehicleDetailViewModel: ObservableObject {
         return "\(days) days"
     }
 
+    /// Notifies SwiftUI that the backing vehicle data changed externally.
+    func notifyVehicleChanged() {
+        objectWillChange.send()
+    }
+
     // MARK: - Update
 
     /// Updates vehicle fields in CoreData and Firestore.

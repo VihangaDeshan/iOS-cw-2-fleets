@@ -15,7 +15,7 @@ final class NotificationService {
     /// Requests notification permission from user.
     /// Call once on app first launch.
     func requestPermission() async {
-        try? await UNUserNotificationCenter.current()
+        _ = try? await UNUserNotificationCenter.current()
             .requestAuthorization(
                 options: [.alert, .badge, .sound])
     }

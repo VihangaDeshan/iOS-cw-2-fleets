@@ -215,7 +215,7 @@ class FirestoreService {
 
     /// Uploads a UIImage to Firebase Storage and returns
     /// the download URL string.
-    /// Used for fault photos and document vault only.
+    /// Used for fault photos and document wallet only.
     func uploadPhoto(
         _ image: UIImage,
         path: String
@@ -828,6 +828,32 @@ class FirestoreService {
 
                     continuation.resume(returning: ())
                 }
+        }
+    }
+
+    /// Deletes a Storage object at the provided storage path.
+    /// Accepts either a raw storage path (e.g. "fleets/.../file.jpg") or
+    /// a normalized path. Ignores "object not found" errors.
+    /// - Parameter path: Storage path to delete.
+    func deleteStorageObject(path: String) async throws {
+        let normalizedPath = normalizedStoragePath(path)
+        guard !normalizedPath.isEmpty else { return }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let ref = Storage.storage().reference().child(normalizedPath)
+            ref.delete { error in
+                if let error {
+                    if self.isStorageObjectNotFound(error) {
+                        continuation.resume(returning: ())
+                        return
+                    }
+
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                continuation.resume(returning: ())
+            }
         }
     }
 

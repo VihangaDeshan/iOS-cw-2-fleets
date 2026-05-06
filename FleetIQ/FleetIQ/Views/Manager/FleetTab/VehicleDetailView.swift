@@ -95,6 +95,11 @@ struct VehicleDetailView: View {
             DocumentVaultView(vehicle: viewModel.vehicle)
                 .environmentObject(authViewModel)
         }
+        .onChange(of: showDocumentVault) { _, isPresented in
+            if !isPresented {
+                viewModel.notifyVehicleChanged()
+            }
+        }
         .sheet(isPresented: $showAssignDriver) {
             assignDriverSheet
         }
@@ -357,6 +362,7 @@ struct VehicleDetailView: View {
             documentRow(
                 icon: "doc.text.fill",
                 name: "Revenue Licence",
+                type: "licence",
                 date: viewModel.vehicle.licenceExpiry
             )
 
@@ -366,6 +372,7 @@ struct VehicleDetailView: View {
             documentRow(
                 icon: "lock.shield.fill",
                 name: "Insurance Certificate",
+                type: "insurance",
                 date: viewModel.vehicle.insuranceExpiry
             )
         }
@@ -380,7 +387,32 @@ struct VehicleDetailView: View {
     ///   - name: Document title.
     ///   - date: Expiry date.
     /// - Returns: Document row view.
-    private func documentRow(icon: String, name: String, date: Date?) -> some View {
+    private func documentRow(icon: String, name: String, type: String, date: Date?) -> some View {
+        let daysRemaining = viewModel.daysRemaining(until: date)
+        let isActionable = (daysRemaining ?? 1) <= 30
+
+        return Group {
+            if isActionable {
+                Button {
+                    showDocumentVault = true
+                } label: {
+                    documentRowContent(icon: icon, name: name, date: date, showsChevron: true)
+                }
+                .buttonStyle(.plain)
+            } else {
+                documentRowContent(icon: icon, name: name, date: date, showsChevron: false)
+            }
+        }
+        .accessibilityLabel("\(name), \(viewModel.expiryChipText(for: date))")
+    }
+
+    /// Builds the visual layout used by each document row.
+    private func documentRowContent(
+        icon: String,
+        name: String,
+        date: Date?,
+        showsChevron: Bool
+    ) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 16))
@@ -411,9 +443,17 @@ struct VehicleDetailView: View {
                 .padding(.vertical, 3)
                 .background(viewModel.expiryColour(for: date).opacity(0.12))
                 .clipShape(Capsule())
+
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(.systemGray3))
+                    .padding(.leading, 4)
+            }
         }
-        .padding(13)
-        .accessibilityLabel("\(name), \(viewModel.expiryChipText(for: date))")
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Actions Card
@@ -441,21 +481,17 @@ struct VehicleDetailView: View {
             Divider()
                 .padding(.leading, 48)
 
-            NavigationLink {
+            navigationActionRow(icon: "clock.fill", title: "View Service History") {
                 ServiceHistoryView(vehicle: viewModel.vehicle)
                     .environmentObject(authViewModel)
-            } label: {
-                actionRowLabel(icon: "clock.fill", title: "View Service History")
             }
 
             Divider()
                 .padding(.leading, 48)
 
-            NavigationLink {
+            navigationActionRow(icon: "road.lanes", title: "View Trip History") {
                 TripHistoryView(vehicle: viewModel.vehicle)
                     .environmentObject(authViewModel)
-            } label: {
-                actionRowLabel(icon: "road.lanes", title: "View Trip History")
             }
 
             Divider()
@@ -473,7 +509,7 @@ struct VehicleDetailView: View {
 
             actionRow(
                 icon: "folder.fill",
-                title: "Document Vault"
+                title: "Document Wallet"
             ) {
                 showDocumentVault = true
             }
@@ -493,8 +529,25 @@ struct VehicleDetailView: View {
     private func actionRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             actionRowLabel(icon: icon, title: title)
-                .padding(13)
         }
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .padding(.horizontal, 13)
+        .accessibilityLabel(title)
+        .accessibilityHint("Double tap to open")
+    }
+
+    /// Builds a navigation row with the same sizing as button rows.
+    private func navigationActionRow<Destination: View>(
+        icon: String,
+        title: String,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink(destination: destination()) {
+            actionRowLabel(icon: icon, title: title)
+        }
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .padding(.horizontal, 13)
+        .contentShape(Rectangle())
         .accessibilityLabel(title)
         .accessibilityHint("Double tap to open")
     }
