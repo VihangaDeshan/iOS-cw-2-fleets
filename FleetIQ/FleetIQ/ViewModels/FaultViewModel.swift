@@ -12,6 +12,7 @@ import CoreLocation
 import FirebaseFirestore
 import FirebaseStorage
 import UIKit
+import UserNotifications
 
 // MARK: - Fault View Model
 @MainActor
@@ -297,9 +298,46 @@ final class FaultViewModel: ObservableObject {
 
         switch target {
         case .manager:
+            let existingIds = Set(faultReports.compactMap { $0.id })
+            let isInitialLoad = existingIds.isEmpty
+            
             faultReports = sorted
+            
+            if !isInitialLoad {
+                for fault in sorted {
+                    guard let faultId = fault.id, !existingIds.contains(faultId) else { continue }
+                    
+                    Task {
+                        let reg = fault.vehicleId.flatMap { vehicleId in
+                            try? context.fetch(NSFetchRequest<VehicleEntity>(entityName: "VehicleEntity")).first(where: { $0.id == vehicleId })?.registration
+                        } ?? "Vehicle"
+                        
+                        NotificationService.shared.sendNewFaultToManager(
+                            vehicleReg: reg,
+                            description: fault.descriptionText ?? "",
+                            urgency: fault.urgency ?? "medium"
+                        )
+                    }
+                }
+            }
         case .driver:
+            // Capture previous statuses before replacing
+            var prevStatuses: [UUID: String] = [:]
+            for fault in myFaults {
+                if let id = fault.id {
+                    prevStatuses[id] = fault.status ?? ""
+                }
+            }
             myFaults = sorted
+            // Fire notification for any status that changed
+            for fault in sorted {
+                guard let faultId = fault.id else { continue }
+                notifyDriverIfStatusChanged(
+                    faultId: faultId,
+                    previousStatus: prevStatuses[faultId] ?? "",
+                    newStatus: fault.status ?? "",
+                    description: fault.descriptionText ?? "")
+            }
         }
 
         recalculateOpenFaultCount()
@@ -494,6 +532,34 @@ final class FaultViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    private func notifyDriverIfStatusChanged(
+        faultId: UUID,
+        previousStatus: String,
+        newStatus: String,
+        description: String
+    ) {
+        let current  = newStatus
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let previous = previousStatus
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard current != previous, !current.isEmpty else { return }
+
+        NotificationService.shared.sendFaultStatusUpdate(
+            newStatus: current,
+            description: description,
+            faultId: faultId)
+    }
+
+    private func vehicleRegistration(for vehicleId: UUID) async -> String {
+        let request = NSFetchRequest<VehicleEntity>(
+            entityName: "VehicleEntity")
+        request.fetchLimit = 1
+        request.predicate = NSPredicate(
+            format: "id == %@", vehicleId as CVarArg)
+        return (try? context.fetch(request).first)?
+            .registration ?? "Vehicle"
     }
 
     private func recalculateOpenFaultCount() {

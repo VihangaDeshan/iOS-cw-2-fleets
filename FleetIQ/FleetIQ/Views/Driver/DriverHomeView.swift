@@ -13,6 +13,9 @@ struct DriverHomeView: View {
     @StateObject private var viewModel = DriverHomeViewModel()
 
     @State private var showTripUnavailableAlert = false
+    @State private var showDriverNotifications = false
+    @State private var hasFireredLoginNotification = false
+    @StateObject private var driverFaultVM = FaultViewModel()
 
     private var startKey: String {
         "\(authViewModel.currentUID)|\(authViewModel.fleetId)|\(authViewModel.assignedVehicleId)"
@@ -43,6 +46,30 @@ struct DriverHomeView: View {
         }
         .task(id: startKey) {
             viewModel.start(authViewModel: authViewModel)
+
+            let fleetId = authViewModel.fleetId
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let driverId = authViewModel.currentUID
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if !fleetId.isEmpty, !driverId.isEmpty {
+                driverFaultVM.startMyFaultListener(
+                    fleetId: fleetId,
+                    driverId: driverId)
+            }
+
+            // Fire welcome notification once per session
+            if !hasFireredLoginNotification {
+                hasFireredLoginNotification = true
+                let name = authViewModel.currentUserName
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                NotificationService.shared.sendDriverWelcome(name: name)
+            }
+        }
+        .sheet(isPresented: $showDriverNotifications) {
+            DriverNotificationsView(faultVM: driverFaultVM)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .onDisappear {
             viewModel.stop()
@@ -60,11 +87,30 @@ struct DriverHomeView: View {
             Spacer()
 
             Button {
+                showDriverNotifications = true
             } label: {
-                Image(systemName: "bell.fill")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.black)
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "bell.fill")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.black)
+
+                    let unresolved = driverFaultVM.myFaults.filter {
+                        let s = ($0.status ?? "open").lowercased()
+                        return s != "open" && s != "resolved"
+                    }.count
+
+                    if unresolved > 0 {
+                        Text("\(min(unresolved, 9))")
+                            .font(.caption2.weight(.bold))
+                            .foregroundColor(.white)
+                            .padding(4)
+                            .background(Color.statusOverdue)
+                            .clipShape(Circle())
+                            .offset(x: 8, y: -8)
+                    }
+                }
             }
+            .accessibilityLabel("View notifications")
 
             NavigationLink {
                 DriverProfileView()
@@ -384,6 +430,94 @@ struct DriverHomeView: View {
 
         let first = trimmed.split(separator: " ").first ?? "Driver"
         return String(first)
+    }
+}
+
+// MARK: - Driver Notifications View
+private struct DriverNotificationsView: View {
+    @ObservedObject var faultVM: FaultViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if faultVM.myFaults.isEmpty {
+                    ContentUnavailableView(
+                        "No Notifications",
+                        systemImage: "bell.slash",
+                        description: Text(
+                            "Fault status updates from your manager appear here.")
+                    )
+                } else {
+                    ForEach(faultVM.myFaults.prefix(20), id: \.id) { fault in
+                        notificationRow(for: fault)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Notifications")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func notificationRow(
+        for fault: FaultReportEntity
+    ) -> some View {
+        let status = (fault.status ?? "open")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        let (icon, color, statusText): (String, Color, String) = {
+            switch status {
+            case "resolved":
+                return ("checkmark.circle.fill",
+                        Color.statusActive, "Resolved")
+            case "workshop_booked", "workshop booked":
+                return ("wrench.and.screwdriver.fill",
+                        Color.statusDueSoon, "Workshop Booked")
+            case "in_progress", "in progress":
+                return ("hammer.fill",
+                        Color.statusDueSoon, "In Progress")
+            case "acknowledged":
+                return ("eye.fill",
+                        Color.navyPrimary, "Acknowledged")
+            default:
+                return ("exclamationmark.triangle.fill",
+                        Color.statusOverdue, "Open")
+            }
+        }()
+
+        return HStack(spacing: 12) {
+            Image(systemName: icon)
+                .foregroundColor(color)
+                .font(.title3)
+                .frame(width: 32, height: 32)
+                .background(color.opacity(0.12))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(fault.descriptionText ?? "Fault report")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+
+                Text("Status: \(statusText)")
+                    .font(.caption.weight(.bold))
+                    .foregroundColor(color)
+
+                if let date = fault.createdAt {
+                    Text(date.formatted(
+                        date: .abbreviated, time: .shortened))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 

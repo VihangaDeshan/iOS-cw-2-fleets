@@ -12,13 +12,13 @@ import UIKit
 import Firebase
 #elseif canImport(FirebaseCore)
 import FirebaseCore
-#endif
-#if canImport(FirebaseFirestore)
 import FirebaseFirestore
 #endif
+import UserNotifications
 
 // MARK: - Firebase Bootstrap
 /// Configures Firebase and Firestore settings when SDKs are available.
+/// Must be called as early as possible in app initialization.
 private func configureFirebaseIfAvailable() {
 #if canImport(Firebase)
     if FirebaseApp.app() == nil {
@@ -29,23 +29,30 @@ private func configureFirebaseIfAvailable() {
         FirebaseApp.configure()
     }
 #endif
-
-#if canImport(FirebaseFirestore)
-    let settings = FirestoreSettings()
-    settings.cacheSettings = PersistentCacheSettings()
-    Firestore.firestore().settings = settings
-#endif
 }
 
 // MARK: - App Delegate
-final class AppDelegate: UIResponder, UIApplicationDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     /// Handles launch-time setup for Firebase-backed services.
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         configureFirebaseIfAvailable()
+        UNUserNotificationCenter.current().delegate = self
         return true
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        if #available(iOS 14.0, *) {
+            completionHandler([.banner, .list, .badge, .sound])
+        } else {
+            completionHandler([.alert, .badge, .sound])
+        }
     }
 }
 
@@ -67,6 +74,14 @@ struct FleetIQApp: App {
     /// Creates app-level state objects.
     init() {
         configureFirebaseIfAvailable()
+
+        // Apply Firestore settings once, immediately after Firebase configure and
+        // before AuthViewModel (which calls Firestore.firestore() on auth restore).
+        let fsSettings = FirestoreSettings()
+        fsSettings.cacheSettings = PersistentCacheSettings()
+        fsSettings.isSSLEnabled = true
+        Firestore.firestore().settings = fsSettings
+
         _authViewModel = StateObject(wrappedValue: AuthViewModel())
 
         if faceIDEnabled {

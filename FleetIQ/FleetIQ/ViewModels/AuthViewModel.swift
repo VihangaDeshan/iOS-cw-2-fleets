@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import FirebaseCore
 import FirebaseAuth
 import FirebaseFirestore
 
@@ -29,10 +30,17 @@ final class AuthViewModel: ObservableObject {
     private var didStartAuthStateListener: Bool = false
 
     // MARK: - Initializer
-    /// Creates the AuthViewModel and starts listening to Firebase authentication state changes.
+    /// Creates the AuthViewModel with lazy Firebase access.
+    /// Auth state listening is NOT started automatically; call startAuthStateListenerIfNeeded()
+    /// after FirebaseApp.configure() has completed.
     init(
         authService: AuthService? = nil,
-        firestoreProvider: @escaping () -> Firestore = { Firestore.firestore() }
+        firestoreProvider: @escaping () -> Firestore = {
+            guard FirebaseApp.app() != nil else {
+                fatalError("Firebase app has not been configured. Call FirebaseApp.configure() in app initialization.")
+            }
+            return Firestore.firestore()
+        }
     ) {
         self.authService = authService ?? AuthService()
         self.firestoreProvider = firestoreProvider

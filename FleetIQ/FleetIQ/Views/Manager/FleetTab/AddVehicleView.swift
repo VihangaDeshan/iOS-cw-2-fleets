@@ -678,20 +678,13 @@ struct AddVehicleView: View {
 
                 try await firestoreService.saveDocument(firestorePayload, fleetId: authViewModel.fleetId, docId: docId)
 
-                // Schedule expiry notifications if an expiry date exists
                 if let expiryDate = expiry {
-                    NotificationService.shared.scheduleExpiryWarning(
+                    NotificationService.shared.scheduleAllExpiryWarnings(
                         vehicleRegistration: normalizedRegistration,
                         documentType: type,
                         expiryDate: expiryDate,
-                        documentId: savedId,
-                        daysBefore: 30)
-                    NotificationService.shared.scheduleExpiryWarning(
-                        vehicleRegistration: normalizedRegistration,
-                        documentType: type,
-                        expiryDate: expiryDate,
-                        documentId: savedId,
-                        daysBefore: 7)
+                        vehicleId: vehicleUUID
+                    )
                 }
             } catch {
                 // Non-fatal: scanned document upload should not block vehicle creation.

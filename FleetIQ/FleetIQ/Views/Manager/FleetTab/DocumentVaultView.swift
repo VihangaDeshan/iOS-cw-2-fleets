@@ -316,18 +316,12 @@ struct DocumentVaultView: View {
                 docId: docId
             )
 
-            NotificationService.shared.scheduleExpiryWarning(
+            NotificationService.shared.scheduleAllExpiryWarnings(
                 vehicleRegistration: vehicle.registration ?? "",
                 documentType: docType,
                 expiryDate: pendingExpiryDate,
-                documentId: savedDocumentId,
-                daysBefore: 30)
-            NotificationService.shared.scheduleExpiryWarning(
-                vehicleRegistration: vehicle.registration ?? "",
-                documentType: docType,
-                expiryDate: pendingExpiryDate,
-                documentId: savedDocumentId,
-                daysBefore: 7)
+                vehicleId: vehicleId
+            )
 
             infoMessage = "\(docType.capitalized) document saved successfully."
             loadDocuments()

@@ -35,6 +35,12 @@ struct ManagerHomeView: View {
     @State private var notifications: [ManagerNotificationItem] = []
     @AppStorage("managerReadNotificationIDs") private var readNotificationIdsRaw: String = ""
 
+    // Bug 2: Today's Activity State
+    @State private var todayServiceRecords: [ServiceRecordEntity] = []
+    @State private var todayFuelLogs: [FuelLogEntity] = []
+    @State private var todayFaultReports: [FaultReportEntity] = []
+    @State private var todayTripLogs: [TripLogEntity] = []
+
     /// Total count shown on the bell badge:
     /// unread notifications + overdue vehicles + expiring licences.
     private var totalAlertCount: Int {
@@ -70,14 +76,14 @@ struct ManagerHomeView: View {
     }
 
     var managerInitials: String {
-        let name = authViewModel.currentUID
+        let name = authViewModel.currentUserName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return "M" }
         let parts = name.split(separator: " ")
-
         if parts.count >= 2 {
-            return String(parts[0].prefix(1)) + String(parts[1].prefix(1))
+            return String(parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
         }
-
-        return "M"
+        return String(name.prefix(2)).uppercased()
     }
 
     // MARK: - Body
@@ -142,6 +148,12 @@ struct ManagerHomeView: View {
             .onAppear {
                 loadHomeMetrics()
             }
+            .onChange(of: fleetViewModel.vehicles.count) { _, _ in
+                loadHomeMetrics()
+            }
+            .onChange(of: fleetViewModel.vehicles) { _, _ in
+                loadHomeMetrics()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)) { _ in
                 loadHomeMetrics()
             }
@@ -151,8 +163,13 @@ struct ManagerHomeView: View {
     // MARK: - Home Header
     var homeHeader: some View {
         HStack {
-            Text("Hi Manager")
-                .font(.title.weight(.bold))
+            Text({
+                let name = authViewModel.currentUserName
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let first = name.split(separator: " ").first.map(String.init) ?? ""
+                return "Hi \(first.isEmpty ? "Manager" : first)"
+            }())
+            .font(.title.weight(.bold))
 
             Spacer()
 
@@ -262,6 +279,7 @@ struct ManagerHomeView: View {
             }
             .padding(.top, 8)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(14)
         .background(
             LinearGradient(
@@ -304,13 +322,19 @@ struct ManagerHomeView: View {
             Spacer()
 
             HStack(alignment: .bottom, spacing: 8) {
-                ForEach(0..<7, id: \.self) { index in
+                ForEach(last7MonthsSpend().indices, id: \ .self) { index in
+                    let values = last7MonthsSpend()
+                    let maxVal = values.max() ?? 1
+                    let barHeight = maxVal > 0
+                        ? CGFloat(22) + CGFloat(48) * CGFloat(values[index]) / CGFloat(maxVal)
+                        : 22
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.white.opacity(0.25 + Double(index) * 0.07))
-                        .frame(width: 26, height: CGFloat(22 + index * 7))
+                        .fill(Color.white.opacity(index == values.count - 1 ? 0.9 : 0.35))
+                        .frame(width: 26, height: barHeight)
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(14)
         .background(
             LinearGradient(
@@ -320,6 +344,36 @@ struct ManagerHomeView: View {
             )
         )
         .cornerRadius(14)
+    }
+
+    /// Returns total spending for each of the last 7 months, oldest first.
+    private func last7MonthsSpend() -> [Double] {
+        let calendar = Calendar.current
+        return (0..<7).reversed().map { monthsAgo -> Double in
+            guard let targetDate = calendar.date(
+                byAdding: .month, value: -monthsAgo, to: Date()),
+                  let startOfMonth = calendar.date(
+                    from: calendar.dateComponents([.year, .month], from: targetDate)),
+                  let endOfMonth = calendar.date(
+                    byAdding: .month, value: 1, to: startOfMonth)
+            else { return 0 }
+
+            let servicePredicate = NSPredicate(
+                format: "date >= %@ AND date < %@",
+                startOfMonth as NSDate, endOfMonth as NSDate)
+            let fuelPredicate = NSPredicate(
+                format: "date >= %@ AND date < %@",
+                startOfMonth as NSDate, endOfMonth as NSDate)
+
+            let serviceReq = ServiceRecordEntity.fetchRequest()
+            serviceReq.predicate = servicePredicate
+            let fuelReq = FuelLogEntity.fetchRequest()
+            fuelReq.predicate = fuelPredicate
+
+            let serviceTotal = (try? context.fetch(serviceReq))?.reduce(0) { $0 + $1.costLKR } ?? 0
+            let fuelTotal = (try? context.fetch(fuelReq))?.reduce(0) { $0 + $1.totalCostLKR } ?? 0
+            return serviceTotal + fuelTotal
+        }
     }
 
     var riskHeroCard: some View {
@@ -665,21 +719,118 @@ struct ManagerHomeView: View {
 
                 Spacer()
 
-                Text("All Records")
-                    .font(.caption)
-                    .foregroundColor(.blue)
+                Button("All Records") {
+                    showRecords = true
+                }
+                .font(.caption)
+                .foregroundColor(.blue)
             }
             .padding(.top, 14)
 
-            Text("No activity logged today")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            let totalToday = todayServiceRecords.count
+                + todayFuelLogs.count
+                + todayFaultReports.count
+                + todayTripLogs.count
+
+            if totalToday == 0 {
+                HStack(spacing: 8) {
+                    Image(systemName: "moon.zzz")
+                        .foregroundColor(.secondary)
+                    Text("No activity logged today")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
                 .background(Color.white)
                 .cornerRadius(12)
                 .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(todayFaultReports.prefix(2)), id: \.id) { fault in
+                        activityRow(
+                            icon: "exclamationmark.triangle.fill",
+                            iconColor: .statusOverdue,
+                            title: "Fault reported",
+                            detail: fault.descriptionText ?? "Fault submitted",
+                            time: fault.createdAt
+                        )
+                        Divider().padding(.leading, 46)
+                    }
+                    ForEach(Array(todayServiceRecords.prefix(2)), id: \.id) { record in
+                        activityRow(
+                            icon: "wrench.and.screwdriver.fill",
+                            iconColor: .navyPrimary,
+                            title: record.serviceType ?? "Service logged",
+                            detail: record.garageName ?? "Service record saved",
+                            time: record.date
+                        )
+                        Divider().padding(.leading, 46)
+                    }
+                    ForEach(Array(todayFuelLogs.prefix(2)), id: \.id) { log in
+                        activityRow(
+                            icon: "fuelpump.fill",
+                            iconColor: .statusDueSoon,
+                            title: "Fuel fill-up logged",
+                            detail: String(format: "%.1f L · LKR %.0f",
+                                          log.litres, log.totalCostLKR),
+                            time: log.date
+                        )
+                        Divider().padding(.leading, 46)
+                    }
+                    ForEach(Array(todayTripLogs.prefix(2)), id: \.id) { trip in
+                        activityRow(
+                            icon: "road.lanes",
+                            iconColor: .driverGreen,
+                            title: trip.purpose?.isEmpty == false
+                                ? trip.purpose! : "Trip logged",
+                            detail: String(format: "%.1f km · %@",
+                                          trip.distanceKm,
+                                          trip.destination ?? "-"),
+                            time: trip.date
+                        )
+                    }
+                }
+                .background(Color.white)
+                .cornerRadius(12)
+                .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+            }
         }
+    }
+
+    private func activityRow(
+        icon: String,
+        iconColor: Color,
+        title: String,
+        detail: String,
+        time: Date?
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(iconColor)
+                .frame(width: 26, height: 26)
+                .background(iconColor.opacity(0.12))
+                .clipShape(Circle())
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if let time {
+                Text(time.formatted(date: .omitted, time: .shortened))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Helpers
@@ -767,6 +918,47 @@ struct ManagerHomeView: View {
         }.count
 
         rebuildNotifications(from: activeFaults)
+        loadTodayActivity()   // Bug 2: Load today's activity at end
+    }
+
+    // Bug 2: Load today's activity
+    private func loadTodayActivity() {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: Date())
+        guard let endOfDay = calendar.date(
+            byAdding: .day, value: 1, to: startOfDay) else { return }
+
+        let dateRange = NSPredicate(
+            format: "date >= %@ AND date < %@",
+            startOfDay as NSDate,
+            endOfDay as NSDate)
+
+        let serviceReq = ServiceRecordEntity.fetchRequest()
+        serviceReq.predicate = dateRange
+        serviceReq.sortDescriptors = [
+            NSSortDescriptor(key: "date", ascending: false)]
+        todayServiceRecords = (try? context.fetch(serviceReq)) ?? []
+
+        let fuelReq = FuelLogEntity.fetchRequest()
+        fuelReq.predicate = dateRange
+        fuelReq.sortDescriptors = [
+            NSSortDescriptor(key: "date", ascending: false)]
+        todayFuelLogs = (try? context.fetch(fuelReq)) ?? []
+
+        let faultReq = FaultReportEntity.fetchRequest()
+        faultReq.predicate = NSPredicate(
+            format: "createdAt >= %@ AND createdAt < %@",
+            startOfDay as NSDate,
+            endOfDay as NSDate)
+        faultReq.sortDescriptors = [
+            NSSortDescriptor(key: "createdAt", ascending: false)]
+        todayFaultReports = (try? context.fetch(faultReq)) ?? []
+
+        let tripReq = TripLogEntity.fetchRequest()
+        tripReq.predicate = dateRange
+        tripReq.sortDescriptors = [
+            NSSortDescriptor(key: "date", ascending: false)]
+        todayTripLogs = (try? context.fetch(tripReq)) ?? []
     }
 
     private func rebuildNotifications(from activeFaults: [FaultReportEntity]) {

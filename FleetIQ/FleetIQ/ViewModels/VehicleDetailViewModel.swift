@@ -149,6 +149,25 @@ final class VehicleDetailViewModel: ObservableObject {
                 vehicleId: vehicle.id?.uuidString ?? "",
                 data: data
             )
+
+            if let id = vehicle.id, let reg = vehicle.registration {
+                if let insuranceExpiry {
+                    NotificationService.shared.scheduleAllExpiryWarnings(
+                        vehicleRegistration: reg,
+                        documentType: "insurance",
+                        expiryDate: insuranceExpiry,
+                        vehicleId: id
+                    )
+                }
+                if let licenceExpiry {
+                    NotificationService.shared.scheduleAllExpiryWarnings(
+                        vehicleRegistration: reg,
+                        documentType: "licence",
+                        expiryDate: licenceExpiry,
+                        vehicleId: id
+                    )
+                }
+            }
         } catch {
             print("VehicleDetailViewModel update error: \(error)")
         }

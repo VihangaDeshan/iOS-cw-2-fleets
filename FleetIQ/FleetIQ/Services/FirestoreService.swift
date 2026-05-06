@@ -34,6 +34,7 @@ class FirestoreService {
     static let shared = FirestoreService()
 
     // MARK: - Private Properties
+    /// Lazy Firestore instance ensures Firebase is configured before access.
     private lazy var db: Firestore = {
         Self.assertFirebaseConfigured()
         return Firestore.firestore()
@@ -41,8 +42,9 @@ class FirestoreService {
 
     // MARK: - Initializer
     /// Creates a Firestore service instance.
+    /// Firebase must be configured before service is used.
     private init() {
-        Self.assertFirebaseConfigured()
+        // Check is deferred to lazy db property to allow @AppDelegate time to initialize Firebase
     }
 
     // MARK: - Vehicles

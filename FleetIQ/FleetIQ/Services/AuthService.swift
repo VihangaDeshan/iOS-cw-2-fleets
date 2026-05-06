@@ -26,11 +26,18 @@ final class AuthService {
 
     // MARK: - Initializer
     /// Creates an AuthService with Firebase Auth and Firestore dependencies.
+    /// Providers are lazily invoked only when needed, after Firebase app initialization.
     init(
         authProvider: @escaping () -> Auth = {
+            guard FirebaseApp.app() != nil else {
+                fatalError("Firebase app has not been configured. Call FirebaseApp.configure() in app initialization.")
+            }
             return Auth.auth()
         },
         firestoreProvider: @escaping () -> Firestore = {
+            guard FirebaseApp.app() != nil else {
+                fatalError("Firebase app has not been configured. Call FirebaseApp.configure() in app initialization.")
+            }
             return Firestore.firestore()
         }
     ) {
