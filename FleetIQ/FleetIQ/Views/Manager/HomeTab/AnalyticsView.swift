@@ -385,19 +385,17 @@ struct AnalyticsView: View {
             let currentMonth = calendar.component(.month, from: Date())
             let currentYear = calendar.component(.year, from: Date())
 
-            let monthlyService = serviceRecords.filter {
+            _ = serviceRecords.filter {
                 guard let date = $0.date else { return false }
                 return calendar.component(.month, from: date) == currentMonth &&
                     calendar.component(.year, from: date) == currentYear
             }
-            .reduce(0) { $0 + $1.costLKR }
 
-            let monthlyFuel = fuelLogs.filter {
+            _ = fuelLogs.filter {
                 guard let date = $0.date else { return false }
                 return calendar.component(.month, from: date) == currentMonth &&
                     calendar.component(.year, from: date) == currentYear
             }
-            .reduce(0) { $0 + $1.totalCostLKR }
 
             let validEfficiencies = fuelLogs.filter { $0.kmPerLitre > 0 }
             averageEfficiency = validEfficiencies.isEmpty

@@ -25,46 +25,52 @@ struct FuelLogView: View {
     private let firestoreService = FirestoreService.shared
 
     var body: some View {
-        List {
-            if !errorText.isEmpty {
-                Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                if !errorText.isEmpty {
                     Text(errorText)
                         .font(.subheadline)
                         .foregroundColor(.statusOverdue)
+                        .padding(.horizontal, 16)
                 }
-            }
 
-            if logs.isEmpty {
-                ContentUnavailableView(
-                    "No Fuel Logs",
-                    systemImage: "fuelpump",
-                    description: Text("Tap + to add the first fuel fill-up")
-                )
-            } else {
-                heroSection
-                
-                Section {
-                    ForEach(logs, id: \.id) { log in
-                        row(for: log)
-                    }
-                    .onDelete { offsets in
-                        Task {
-                            await deleteLogs(at: offsets)
+                if logs.isEmpty {
+                    ContentUnavailableView(
+                        "No Fuel Logs",
+                        systemImage: "fuelpump.fill",
+                        description: Text("Tap the + button to add your first fuel entry.")
+                    )
+                    .padding(.top, 60)
+                } else {
+                    heroSection
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("FUEL LOG — \(currentMonthName())")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                            .tracking(0.5)
+                            .padding(.horizontal, 4)
+
+                        LazyVStack(spacing: 12) {
+                            ForEach(logs, id: \.id) { log in
+                                row(for: log)
+                            }
                         }
                     }
-                } header: {
-                    Text("FUEL LOG — \(currentMonthName())")
                 }
             }
+            .padding(16)
         }
+        .background(Color.systemGroupedBg)
         .navigationTitle("Fuel Log")
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     showAddSheet = true
                 } label: {
-                    Image(systemName: "plus")
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(Color.navyPrimary)
                 }
                 .accessibilityLabel("Add fuel log")
             }
@@ -94,19 +100,32 @@ struct FuelLogView: View {
     // MARK: - Hero Section
     
     private var heroSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("\((vehicle.registration ?? "UNKNOWN").uppercased()) — FUEL EFFICIENCY")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.white.opacity(0.8))
-                .tracking(1.0)
-            
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("FUEL EFFICIENCY")
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .tracking(1.5)
+
+                    Text(vehicle.registration ?? "UNKNOWN")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                }
+                Spacer()
+                Image(systemName: "fuelpump.fill")
+                    .font(.title2)
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            
+            HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(String(format: "%.1f km/L", averageEfficiency))
-                        .font(.system(size: 28, weight: .bold))
+                    Text(String(format: "%.1f", averageEfficiency))
+                        .font(.system(size: 34, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
-                    Text("AVERAGE")
-                        .font(.system(size: 10, weight: .semibold))
+                    
+                    Text("KM/L AVERAGE")
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.white.opacity(0.7))
                 }
                 
@@ -114,10 +133,11 @@ struct FuelLogView: View {
                 
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(formattedCostThisMonth)
-                        .font(.system(size: 28, weight: .bold))
+                        .font(.system(size: 34, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
-                    Text("THIS MONTH")
-                        .font(.system(size: 10, weight: .semibold))
+                    
+                    Text("SPENT THIS MONTH")
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.white.opacity(0.7))
                 }
             }
@@ -125,15 +145,13 @@ struct FuelLogView: View {
         .padding(20)
         .background(
             LinearGradient(
-                colors: [.navyPrimary, .navyPrimary.opacity(0.85)],
+                colors: [Color.navyPrimary, Color(hex: "2E5BA8")],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         )
-        .cornerRadius(16)
-        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: Color.navyPrimary.opacity(0.2), radius: 10, x: 0, y: 5)
     }
 
     private var averageEfficiency: Double {
@@ -158,9 +176,9 @@ struct FuelLogView: View {
     
     private var formattedCostThisMonth: String {
         if costThisMonth >= 1000 {
-            return String(format: "LKR %.0fK", costThisMonth / 1000)
+            return String(format: "%.0fK", costThisMonth / 1000)
         } else {
-            return String(format: "LKR %.0f", costThisMonth)
+            return String(format: "%.0f", costThisMonth)
         }
     }
     
@@ -174,21 +192,20 @@ struct FuelLogView: View {
     
     private func row(for log: FuelLogEntity) -> some View {
         HStack(spacing: 16) {
-            // Icon
             ZStack {
                 Circle()
-                    .fill(Color(.systemGray6))
+                    .fill(Color.navyPrimary.opacity(0.1))
                     .frame(width: 44, height: 44)
                 
-                Image(systemName: "fuelpump")
+                Image(systemName: "fuelpump.fill")
                     .foregroundColor(.navyPrimary)
-                    .font(.system(size: 20))
+                    .font(.system(size: 18))
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(mediumDate(log.date ?? Date()))
-                        .font(.headline)
+                        .font(.subheadline.weight(.bold))
                         .foregroundColor(.primary)
                     
                     Spacer()
@@ -199,9 +216,11 @@ struct FuelLogView: View {
                 }
                 
                 HStack(spacing: 6) {
-                    Text("\(String(format: "%.1f", log.litres))L · \(String(format: "%.0f", log.mileage)) km ·")
-                        .font(.subheadline)
+                    Text("\(String(format: "%.1f", log.litres))L · \(String(format: "%.0f", log.mileage)) km")
+                        .font(.caption)
                         .foregroundColor(.secondary)
+                    
+                    Spacer()
                     
                     if log.kmPerLitre > 0 {
                         efficiencyPill(for: log.kmPerLitre)
@@ -209,22 +228,29 @@ struct FuelLogView: View {
                 }
             }
         }
-        .padding(.vertical, 8)
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
     }
     
     @ViewBuilder
     private func efficiencyPill(for eff: Double) -> some View {
         let isGood = eff >= averageEfficiency
-        let color = isGood ? Color.green : Color.orange
-        let icon = isGood ? "▲" : "▼"
+        let color = isGood ? Color.statusActive : Color.statusDueSoon
+        let icon = isGood ? "arrow.up" : "arrow.down"
         
-        Text("\(String(format: "%.1f", eff)) km/L \(icon)")
-            .font(.system(size: 10, weight: .bold))
-            .foregroundColor(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.15))
-            .cornerRadius(4)
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 8, weight: .bold))
+            Text("\(String(format: "%.1f", eff)) km/L")
+                .font(.system(size: 10, weight: .bold))
+        }
+        .foregroundColor(color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.1))
+        .clipShape(Capsule())
     }
 
     private func loadLogs() {
@@ -239,7 +265,6 @@ struct FuelLogView: View {
 
         let all = (try? context.fetch(request)) ?? []
 
-        // Deduplicate by UUID — CoreData can hold duplicates if sync and backfill race
         var seen = Set<UUID>()
         logs = all.filter { log in
             guard let id = log.id else { return false }
@@ -316,7 +341,6 @@ struct FuelLogView: View {
         request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
         let existing = (try? context.fetch(request)) ?? []
 
-        // On first sync: upload any local-only records to Firestore before they get deleted
         if !fuelLogsBackfilled {
             fuelLogsBackfilled = true
             let fleetId = authViewModel.fleetId
@@ -341,7 +365,7 @@ struct FuelLogView: View {
                         try? await firestoreService.saveFuelLog(payload, fleetId: fleetId, logId: logId)
                     }
                 }
-                return // listener will fire again once uploads complete
+                return 
             }
         }
 
@@ -442,10 +466,9 @@ private struct AddFuelLogSheet: View {
     @State private var errorText = ""
     @State private var isSaving = false
     @State private var previousMileage: Double = 0
+    @State private var manualEfficiency = ""
 
     private let firestoreService = FirestoreService.shared
-
-    @State private var manualEfficiency = ""
 
     private var enteredMileage: Double? {
         Double(mileage.replacingOccurrences(of: ",", with: ""))
@@ -461,68 +484,147 @@ private struct AddFuelLogSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("FILL-UP DETAILS") {
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
-
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Header Section
                     VStack(alignment: .leading, spacing: 4) {
-                        TextField("Mileage (km)", text: $mileage)
-                            .keyboardType(.decimalPad)
+                        Text("LOG FUEL FILL-UP")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .tracking(0.5)
+                        
+                        Text(vehicle.registration ?? "Unknown Vehicle")
+                            .font(.title2.weight(.bold))
+                    }
+                    .padding(.horizontal, 4)
 
-                        if previousMileage > 0 {
-                            Text("Last logged: \(String(format: "%.0f", previousMileage)) km")
+                    // Form Container
+                    VStack(spacing: 20) {
+                        // Date Picker
+                        HStack {
+                            Label("Date", systemImage: "calendar")
+                                .font(.subheadline.weight(.medium))
+                            Spacer()
+                            DatePicker("", selection: $date, displayedComponents: .date)
+                                .labelsHidden()
+                        }
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                        // Mileage Input
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Label("Odometer (km)", systemImage: "gauge.with.needle")
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                TextField("Current km", text: $mileage)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .font(.subheadline.weight(.bold))
+                            }
+
+                            if previousMileage > 0 {
+                                HStack {
+                                    Text("Previous logged:")
+                                    Spacer()
+                                    Text("\(String(format: "%.0f", previousMileage)) km")
+                                }
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                        }
+                            }
 
-                        if let m = enteredMileage, m > 0, m < previousMileage {
-                            Text("Must be ≥ last logged \(String(format: "%.0f", previousMileage)) km")
-                                .font(.caption)
-                                .foregroundStyle(Color.statusOverdue)
+                            if let m = enteredMileage, m > 0, m < previousMileage {
+                                Text("Odometer must be ≥ \(String(format: "%.0f", previousMileage)) km")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.statusOverdue)
+                            }
                         }
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                        // Volume and Cost
+                        VStack(spacing: 12) {
+                            HStack {
+                                Label("Litres", systemImage: "drop.fill")
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                TextField("0.00", text: $litres)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .font(.subheadline.weight(.bold))
+                            }
+                            
+                            Divider()
+
+                            HStack {
+                                Label("Total Cost (LKR)", systemImage: "banknote.fill")
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                TextField("0.00", text: $totalCost)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .font(.subheadline.weight(.bold))
+                            }
+                        }
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                        // Efficiency Result
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Label("Efficiency (km/L)", systemImage: "leaf.fill")
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                TextField("Calculated", text: $manualEfficiency)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundColor(.statusActive)
+                            }
+                        }
+                        .padding()
+                        .background(Color.statusActive.opacity(0.05))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
 
-                    TextField("Litres", text: $litres)
-                        .keyboardType(.decimalPad)
-
-                    TextField("Total Cost (LKR)", text: $totalCost)
-                        .keyboardType(.decimalPad)
-                }
-                
-                Section("EFFICIENCY") {
-                    HStack {
-                        Text("Efficiency (km/L)")
-                        Spacer()
-                        TextField("0.0", text: $manualEfficiency)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                    }
-                }
-
-                if !errorText.isEmpty {
-                    Section {
+                    if !errorText.isEmpty {
                         Text(errorText)
                             .foregroundColor(.statusOverdue)
-                            .font(.subheadline)
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 4)
                     }
+
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        if isSaving {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text("Save Fuel Log")
+                                .font(.headline)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Color.navyPrimary)
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .disabled(isSaving)
                 }
+                .padding(16)
             }
-            .navigationTitle("Add Fuel Log")
+            .background(Color.systemGroupedBg)
+            .navigationTitle("New Entry")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        Task { await save() }
-                    }
-                    .fontWeight(.bold)
-                    .disabled(isSaving)
-                }
             }
-            .disabled(isSaving)
             .onAppear { prefillMileage() }
             .onChange(of: mileage) { _, _ in updateEstimatedEfficiency() }
             .onChange(of: litres) { _, _ in updateEstimatedEfficiency() }

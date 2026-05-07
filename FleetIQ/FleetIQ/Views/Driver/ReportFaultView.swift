@@ -54,13 +54,25 @@ struct ReportFaultView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
                     dangerBanner
-                    descriptionSection
-                    urgencySection
-                    photosSection
+                    
+                    VStack(alignment: .leading, spacing: 10) {
+                        sectionHeader("DESCRIPTION")
+                        descriptionSection
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        sectionHeader("URGENCY")
+                        urgencySection
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        sectionHeader("PHOTOS (OPTIONAL)")
+                        photosSection
+                    }
+
                     gpsInfoBanner
 
                     if normalizedVehicleId.isEmpty {
@@ -68,46 +80,40 @@ struct ReportFaultView: View {
                     }
 
                     sendButton
+                        .padding(.top, 10)
                 }
                 .padding(16)
             }
-            .background(Color.systemGroupedBg)
-            .safeAreaInset(edge: .bottom) {
-                Color.clear
-                    .frame(height: 112)
-            }
-            .navigationTitle("Report Fault")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        MyFaultHistoryView()
-                    } label: {
-                        Label("History", systemImage: "clock.arrow.circlepath")
-                    }
-                }
-            }
-            .navigationDestination(item: $submittedFaultPayload) { payload in
-                FaultConfirmationView(
-                    faultId: payload.id,
-                    submittedAt: payload.submittedAt,
-                    fleetId: payload.fleetId,
-                    driverId: payload.driverId,
-                    vehicleId: payload.vehicleId
-                ) {
-                    resetForm()
+        .background(Color.systemGroupedBg)
+        .navigationTitle("Report Fault")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    MyFaultHistoryView()
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.subheadline.weight(.semibold))
                 }
             }
         }
-        .alert("Could not send report", isPresented: $showErrorAlert) {
-            Button("OK", role: .cancel) {
+        .navigationDestination(item: $submittedFaultPayload) { payload in
+            FaultConfirmationView(
+                faultId: payload.id,
+                submittedAt: payload.submittedAt,
+                fleetId: payload.fleetId,
+                driverId: payload.driverId,
+                vehicleId: payload.vehicleId
+            ) {
+                resetForm()
             }
+        }
+        .alert("Could not send report", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
         }
         .alert("Report Sent", isPresented: $showPartialSuccessAlert) {
-            Button("OK", role: .cancel) {
-            }
+            Button("OK", role: .cancel) { }
         } message: {
             Text("Report was sent without the photo because upload failed.")
         }
@@ -115,123 +121,122 @@ struct ReportFaultView: View {
 
     // MARK: - Sections
     private var dangerBanner: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
+                .font(.title3)
                 .foregroundColor(.statusOverdue)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Safety First")
-                    .font(.headline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
+                    .foregroundColor(.primary)
 
-                Text("Park safely before submitting this report. Emergency issues should be marked as High urgency.")
-                    .font(.subheadline)
+                Text("Park safely before submitting this report. Mark emergency issues as High urgency.")
+                    .font(.caption)
                     .foregroundColor(.secondary)
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.chipRedBg)
+        .background(Color.statusOverdue.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var descriptionSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Fault Description")
-                .font(.headline)
-
+        VStack(alignment: .leading, spacing: 12) {
             TextEditor(text: $descriptionText)
-                .frame(minHeight: 130)
-                .padding(8)
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color(.systemGray4), lineWidth: 1)
-                )
+                .frame(minHeight: 120)
+                .font(.subheadline)
+                .padding(4)
+            
+            Divider()
 
-            Text("Describe the issue clearly: noises, warning lights, behavior, and when it started.")
+            Text("Describe the issue clearly: noises, warning lights, or unusual behavior.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
     }
 
     private var urgencySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Urgency")
-                .font(.headline)
-
-            HStack(spacing: 10) {
-                ForEach(FaultUrgency.allCases, id: \.self) { urgency in
-                    Button {
-                        selectedUrgency = urgency
-                    } label: {
-                        Text(urgency.title)
-                            .font(.subheadline.weight(.semibold))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 9)
-                            .frame(maxWidth: .infinity)
-                            .background(selectedUrgency == urgency ? urgency.activeBackground : urgency.inactiveBackground)
-                            .foregroundColor(selectedUrgency == urgency ? .white : urgency.activeText)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Urgency: \(urgency.title)")
-                    .accessibilityHint("Tap to select this urgency level")
-                    .accessibilityAddTraits(selectedUrgency == urgency ? .isSelected : [])
+        HStack(spacing: 8) {
+            ForEach(FaultUrgency.allCases, id: \.self) { urgency in
+                Button {
+                    selectedUrgency = urgency
+                } label: {
+                    Text(urgency.title)
+                        .font(.caption.weight(.bold))
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity)
+                        .background(selectedUrgency == urgency ? urgency.activeBackground : Color(.systemBackground))
+                        .foregroundColor(selectedUrgency == urgency ? .white : .primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(selectedUrgency == urgency ? Color.clear : Color(.systemGray5), lineWidth: 1)
+                        )
                 }
+                .buttonStyle(.plain)
             }
         }
     }
 
     private var photosSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Photos (Optional)")
-                .font(.headline)
-
-            Text("Attach up to 3 images from your photo library. Selected images are uploaded in order.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
                 PhotoSlotView(item: $photoItem1, image: $photo1, label: "1")
                 PhotoSlotView(item: $photoItem2, image: $photo2, label: "2")
                 PhotoSlotView(item: $photoItem3, image: $photo3, label: "3")
             }
+            
+            Text("Attach up to 3 images from your library.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
         }
     }
 
     private var gpsInfoBanner: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 12) {
             Image(systemName: "location.fill")
-                .foregroundColor(.driverGreen)
+                .font(.caption)
+                .foregroundColor(.statusActive)
+                .frame(width: 32, height: 32)
+                .background(Color.statusActive.opacity(0.1))
+                .clipShape(Circle())
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("GPS Included")
-                    .font(.subheadline.weight(.semibold))
-
-                Text("Your current location is captured automatically when you send the report.")
+            VStack(alignment: .leading, spacing: 2) {
+                Text("GPS INCLUDED")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.5)
+                
+                Text("Your location is automatically captured.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            Spacer()
         }
         .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.chipGreenBg)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
     }
 
     private var missingVehicleBanner: some View {
         HStack(spacing: 10) {
             Image(systemName: "car.fill")
-                .foregroundColor(.chipOrangeText)
+                .foregroundColor(.statusDueSoon)
 
-            Text("No assigned vehicle found. Ask your manager to assign a vehicle before reporting faults.")
-                .font(.subheadline)
-                .foregroundColor(.chipOrangeText)
+            Text("No assigned vehicle found. Contact manager.")
+                .font(.caption.weight(.medium))
+                .foregroundColor(.statusDueSoon)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.chipOrangeBg)
+        .background(Color.statusDueSoon.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
@@ -249,19 +254,26 @@ struct ReportFaultView: View {
                     Image(systemName: "paperplane.fill")
                 }
 
-                Text(faultViewModel.isSending ? "Sending..." : "Send Fault Report")
-                    .font(.headline.weight(.semibold))
+                Text(faultViewModel.isSending ? "SENDING..." : "SEND FAULT REPORT")
+                    .font(.subheadline.weight(.bold))
+                    .tracking(0.5)
             }
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(canSubmit ? Color.statusOverdue : Color(.systemGray3))
+            .padding(.vertical, 16)
+            .background(canSubmit ? Color.navyPrimary : Color(.systemGray4))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(color: (canSubmit ? Color.navyPrimary : Color.clear).opacity(0.3), radius: 10, x: 0, y: 5)
         }
         .disabled(!canSubmit)
-        .accessibilityLabel("Send fault report")
-        .accessibilityHint("Submits report to manager immediately")
-        .padding(.top, 4)
+    }
+
+    private func sectionHeader(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundColor(.secondary)
+            .tracking(0.5)
+            .padding(.horizontal, 4)
     }
 
     // MARK: - Actions
