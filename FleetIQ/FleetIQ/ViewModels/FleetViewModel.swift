@@ -23,6 +23,8 @@ class FleetViewModel: ObservableObject {
     private var listener: ListenerRegistration?
     private let context = PersistenceController.shared.viewContext
     private let firestoreService = FirestoreService.shared
+    private var currentFleetId: String = ""
+    private var hasPerformedInitialBackfill = false
 
     // MARK: - Load
 
@@ -40,6 +42,9 @@ class FleetViewModel: ObservableObject {
             isLoading = false
             return
         }
+
+        currentFleetId = normalizedFleetId
+        hasPerformedInitialBackfill = false
 
         fetchFromCoreData()
         stopListening()
@@ -92,6 +97,44 @@ class FleetViewModel: ObservableObject {
             fetchFromCoreData()
         } catch {
             errorMessage = error.localizedDescription
+            return
+        }
+
+        // One-time backfill: upload any CoreData vehicles missing from Firestore
+        if !hasPerformedInitialBackfill && !currentFleetId.isEmpty {
+            hasPerformedInitialBackfill = true
+            let firestoreIds = Set(docs.map { $0.documentID })
+            Task {
+                await backfillMissingVehicles(firestoreIds: firestoreIds)
+            }
+        }
+    }
+
+    private func backfillMissingVehicles(firestoreIds: Set<String>) async {
+        let localOnly = vehicles.filter { vehicle in
+            guard let id = vehicle.id?.uuidString else { return false }
+            return !firestoreIds.contains(id)
+        }
+
+        for vehicle in localOnly {
+            guard let vehicleId = vehicle.id?.uuidString else { continue }
+
+            var payload: [String: Any] = [
+                "id": vehicleId,
+                "registration": vehicle.registration ?? "",
+                "make": vehicle.make ?? "",
+                "model": vehicle.model ?? "",
+                "year": Int(vehicle.year),
+                "fuelType": vehicle.fuelType ?? "",
+                "currentMileage": vehicle.currentMileage,
+                "assignedDriverId": vehicle.assignedDriverId ?? ""
+            ]
+
+            if let exp = vehicle.insuranceExpiry { payload["insuranceExpiry"] = Timestamp(date: exp) }
+            if let exp = vehicle.licenceExpiry { payload["licenceExpiry"] = Timestamp(date: exp) }
+            if let at = vehicle.createdAt { payload["createdAt"] = Timestamp(date: at) }
+
+            try? await firestoreService.saveVehicle(payload, fleetId: currentFleetId, vehicleId: vehicleId)
         }
     }
 
@@ -141,7 +184,7 @@ class FleetViewModel: ObservableObject {
             "fuelType": fuelType,
             "currentMileage": currentMileage,
             "createdAt": Timestamp(date: createdAt),
-            "assignedDriverId": assignedDriverName ?? ""
+            "assignedDriverId": assignedDriverUserId ?? ""
         ]
 
         if let insuranceExpiry {
@@ -172,8 +215,8 @@ class FleetViewModel: ObservableObject {
                 )
             }
             
-            // Only IF cloud save succeeds, save to CoreData locally
-            let vehicle = VehicleEntity(context: context)
+            // Upsert: reuse existing entity if the listener already created one from the cloud write
+            let vehicle = existingVehicle(with: newId) ?? VehicleEntity(context: context)
             vehicle.id = newId
             vehicle.registration = normalizedRegistration
             vehicle.make = normalizedMake

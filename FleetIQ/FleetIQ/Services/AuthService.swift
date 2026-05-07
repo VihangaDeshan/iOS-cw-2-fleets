@@ -85,11 +85,13 @@ final class AuthService {
             }
         }
 
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+
         var data: [String: Any] = [
             "name": name,
             "email": email,
             "role": normalizedRole,
-            "fleetId": fleetId,
+            "fleetId": normalizedFleetId,
             "createdAt": Timestamp(date: Date())
         ]
 

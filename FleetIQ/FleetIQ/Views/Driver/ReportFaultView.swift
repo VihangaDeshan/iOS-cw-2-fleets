@@ -289,6 +289,9 @@ struct ReportFaultView: View {
                 driverId: normalizedDriverId,
                 vehicleId: normalizedVehicleId
             )
+            if faultViewModel.photoUploadFailed {
+                showPartialSuccessAlert = true
+            }
         } catch {
             if !selectedPhotos.isEmpty,
                shouldRetryWithoutPhoto(for: error) {

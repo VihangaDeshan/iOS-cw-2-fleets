@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import CoreData
 
 // MARK: - Edit Vehicle View
 struct EditVehicleView: View {
@@ -23,8 +24,10 @@ struct EditVehicleView: View {
     @State private var currentMileage: String
     @State private var insuranceExpiry: Date
     @State private var licenceExpiry: Date
+    @State private var emissionExpiry: Date
     @State private var hasInsuranceDate: Bool
     @State private var hasLicenceDate: Bool
+    @State private var hasEmissionDate: Bool
     @State private var isSaving = false
     @State private var errorText = ""
 
@@ -32,9 +35,16 @@ struct EditVehicleView: View {
     let fuelTypes = ["Diesel", "Petrol", "Hybrid", "Electric", "CNG"]
     let years = Array(2000...2026).map { Int16($0) }.reversed()
 
+    private var requiresEmissionTest: Bool {
+        let ft = fuelType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ft != "hybrid" && ft != "electric"
+    }
+
     // MARK: - Initializer
 
     /// Builds prefilled form state from the selected vehicle.
+    /// Emission expiry is loaded from CoreData DocumentEntity since it is not
+    /// stored directly on VehicleEntity.
     /// - Parameter viewModel: Vehicle detail view model with current vehicle values.
     init(viewModel: VehicleDetailViewModel) {
         self.viewModel = viewModel
@@ -50,6 +60,19 @@ struct EditVehicleView: View {
         _licenceExpiry = State(initialValue: vehicle.licenceExpiry ?? Date())
         _hasInsuranceDate = State(initialValue: vehicle.insuranceExpiry != nil)
         _hasLicenceDate = State(initialValue: vehicle.licenceExpiry != nil)
+
+        // Load emission expiry from DocumentEntity (stored separately, not on VehicleEntity)
+        let existingEmission: Date? = {
+            guard let vehicleId = vehicle.id else { return nil }
+            let ctx = PersistenceController.shared.viewContext
+            let req = DocumentEntity.fetchRequest()
+            req.predicate = NSPredicate(format: "vehicleId == %@ AND type == %@",
+                                        vehicleId as CVarArg, "emission")
+            req.fetchLimit = 1
+            return (try? ctx.fetch(req))?.first?.expiryDate
+        }()
+        _emissionExpiry = State(initialValue: existingEmission ?? Date())
+        _hasEmissionDate = State(initialValue: existingEmission != nil)
     }
 
     // MARK: - Body
@@ -99,6 +122,18 @@ struct EditVehicleView: View {
                             selection: $licenceExpiry,
                             displayedComponents: .date
                         )
+                    }
+
+                    if requiresEmissionTest {
+                        Toggle("Emission Test", isOn: $hasEmissionDate)
+
+                        if hasEmissionDate {
+                            DatePicker(
+                                "Emission Expiry",
+                                selection: $emissionExpiry,
+                                displayedComponents: .date
+                            )
+                        }
                     }
                 }
 
@@ -177,6 +212,7 @@ struct EditVehicleView: View {
             currentMileage: mileageValue,
             insuranceExpiry: hasInsuranceDate ? insuranceExpiry : nil,
             licenceExpiry: hasLicenceDate ? licenceExpiry : nil,
+            emissionExpiry: (requiresEmissionTest && hasEmissionDate) ? emissionExpiry : nil,
             fleetId: authViewModel.fleetId
         )
 

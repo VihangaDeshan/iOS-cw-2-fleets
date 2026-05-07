@@ -252,9 +252,14 @@ final class DriverHomeViewModel: ObservableObject {
         }
 
         let fuelToday = (try? context.fetch(fuelRequest)) ?? []
-        todayFuelLogs = fuelToday.count
+        var seenFuelIds = Set<UUID>()
+        let uniqueFuelToday = fuelToday.filter { log in
+            guard let id = log.id else { return false }
+            return seenFuelIds.insert(id).inserted
+        }
+        todayFuelLogs = uniqueFuelToday.count
 
-        buildTodayActivityItems(trips: tripsToday, fuelLogs: fuelToday)
+        buildTodayActivityItems(trips: tripsToday, fuelLogs: uniqueFuelToday)
 
         let faultRequest = NSFetchRequest<FaultReportEntity>(entityName: "FaultReportEntity")
         if let vehicleUUID {

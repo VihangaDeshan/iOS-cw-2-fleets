@@ -109,6 +109,7 @@ final class VehicleDetailViewModel: ObservableObject {
         currentMileage: Double,
         insuranceExpiry: Date?,
         licenceExpiry: Date?,
+        emissionExpiry: Date?,
         fleetId: String
     ) async {
         isLoading = true
@@ -117,22 +118,14 @@ final class VehicleDetailViewModel: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
 
-        vehicle.registration = normalizedRegistration
-        vehicle.make = make.trimmingCharacters(in: .whitespacesAndNewlines)
-        vehicle.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        vehicle.year = year
-        vehicle.fuelType = fuelType
-        vehicle.currentMileage = currentMileage
-        vehicle.insuranceExpiry = insuranceExpiry
-        vehicle.licenceExpiry = licenceExpiry
+        let normalizedMake = make.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
 
         do {
-            try context.save()
-
             var data: [String: Any] = [
-                "registration": vehicle.registration ?? "",
-                "make": vehicle.make ?? "",
-                "model": vehicle.model ?? "",
+                "registration": normalizedRegistration,
+                "make": normalizedMake,
+                "model": normalizedModel,
                 "year": Int(year),
                 "fuelType": fuelType,
                 "currentMileage": currentMileage,
@@ -150,6 +143,17 @@ final class VehicleDetailViewModel: ObservableObject {
                 data: data
             )
 
+            vehicle.registration = normalizedRegistration
+            vehicle.make = normalizedMake
+            vehicle.model = normalizedModel
+            vehicle.year = year
+            vehicle.fuelType = fuelType
+            vehicle.currentMileage = currentMileage
+            vehicle.insuranceExpiry = insuranceExpiry
+            vehicle.licenceExpiry = licenceExpiry
+
+            try context.save()
+
             if let id = vehicle.id, let reg = vehicle.registration {
                 if let insuranceExpiry {
                     NotificationService.shared.scheduleAllExpiryWarnings(
@@ -166,6 +170,44 @@ final class VehicleDetailViewModel: ObservableObject {
                         expiryDate: licenceExpiry,
                         vehicleId: id
                     )
+                }
+
+                // Upsert or clear the emission DocumentEntity and Firestore document.
+                let docId = "\(id.uuidString)_emission"
+                let req = DocumentEntity.fetchRequest()
+                req.predicate = NSPredicate(format: "vehicleId == %@ AND type == %@",
+                                            id as CVarArg, "emission")
+                req.fetchLimit = 1
+                let existing = (try? context.fetch(req))?.first
+
+                if let expiry = emissionExpiry {
+                    let entity = existing ?? DocumentEntity(context: context)
+                    if existing == nil { entity.id = UUID() }
+                    entity.vehicleId = id
+                    entity.type = "emission"
+                    entity.expiryDate = expiry
+                    entity.photoURL = existing?.photoURL ?? ""
+                    try context.save()
+
+                    let payload: [String: Any] = [
+                        "id": docId,
+                        "vehicleId": id.uuidString,
+                        "type": "emission",
+                        "expiryDate": Timestamp(date: expiry),
+                        "photoURL": existing?.photoURL ?? "",
+                        "updatedAt": Timestamp(date: Date())
+                    ]
+                    try await firestoreService.saveDocument(payload, fleetId: fleetId, docId: docId)
+
+                    NotificationService.shared.scheduleAllExpiryWarnings(
+                        vehicleRegistration: reg,
+                        documentType: "emission",
+                        expiryDate: expiry,
+                        vehicleId: id
+                    )
+                } else if let existing {
+                    context.delete(existing)
+                    try context.save()
                 }
             }
         } catch {

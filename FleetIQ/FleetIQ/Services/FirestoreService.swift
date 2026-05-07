@@ -1115,6 +1115,7 @@ class FirestoreService {
             "year": data["year"] as? Int ?? 0,
             "fuelType": data["fuelType"] as? String ?? "",
             "currentMileage": data["currentMileage"] as? Double ?? 0,
+            "assignedDriverId": data["assignedDriverId"] as? String ?? "",
             "insuranceExpiry": insuranceExpiry,
             "licenceExpiry": licenceExpiry,
             "createdAt": FieldValue.serverTimestamp()

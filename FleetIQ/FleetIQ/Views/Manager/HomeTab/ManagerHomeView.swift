@@ -15,6 +15,7 @@ struct ManagerHomeView: View {
     @EnvironmentObject var fleetViewModel: FleetViewModel
 
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var showAddVehicle = false
     @State private var showManageDrivers = false
@@ -169,6 +170,11 @@ struct ManagerHomeView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)) { _ in
                 loadHomeMetrics()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    loadHomeMetrics()
+                }
             }
         }
     }
@@ -497,22 +503,43 @@ struct ManagerHomeView: View {
             }
             .padding(.top, 14)
 
-            let overdue = fleetViewModel.vehicles.filter {
-                fleetViewModel.vehicleStatus($0) == "Overdue"
-            }
+            // Deduplicate by registration to handle CoreData duplicates
+            let overdue: [VehicleEntity] = {
+                var seen = Set<String>()
+                return fleetViewModel.vehicles.filter { v in
+                    fleetViewModel.vehicleStatus(v) == "Overdue"
+                        && seen.insert(v.registration ?? "").inserted
+                }
+            }()
 
-            let expiring = fleetViewModel.vehicles.filter {
-                isLicenceExpiringSoon($0)
-            }
-
+            // Fault-only unread notifications (expiry items shown separately below)
             let priorityNotifications = Array(
                 notifications
-                    .filter { !$0.isRead }
+                    .filter {
+                        !$0.isRead
+                            && !$0.id.hasPrefix("licence-")
+                            && !$0.id.hasPrefix("insurance-")
+                            && !$0.id.hasPrefix("doc-")
+                    }
                     .sorted { $0.date > $1.date }
-                    .prefix(2)
+                    .prefix(3)
             )
 
-            if overdue.isEmpty && expiring.isEmpty && priorityNotifications.isEmpty {
+            // All expiry alerts (licence + insurance + docs), deduplicated by title
+            // so duplicate CoreData records for the same vehicle collapse to one row.
+            let expiryAlerts: [ManagerNotificationItem] = {
+                var seenTitles = Set<String>()
+                return notifications
+                    .filter {
+                        $0.id.hasPrefix("licence-")
+                            || $0.id.hasPrefix("insurance-")
+                            || $0.id.hasPrefix("doc-")
+                    }
+                    .sorted { $0.date > $1.date }
+                    .filter { seenTitles.insert($0.title).inserted }
+            }()
+
+            if overdue.isEmpty && priorityNotifications.isEmpty && expiryAlerts.isEmpty {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.statusActive)
@@ -559,24 +586,51 @@ struct ManagerHomeView: View {
                     .buttonStyle(.plain)
                 }
 
-                // Expiring licence alerts → tap to open vehicle detail
-                ForEach(expiring.prefix(2), id: \.id) { vehicle in
-                    NavigationLink(destination: VehicleDetailView(vehicle: vehicle)
-                                    .environmentObject(authViewModel)
-                                    .environmentObject(fleetViewModel)) {
-                        alertRow(
-                            icon: "doc.fill",
-                            iconBg: Color.chipOrangeBg,
-                            iconColour: Color.chipOrangeText,
-                            title: "Licence Expiring - \(vehicle.registration ?? "")",
-                            subtitle: licenceDaysText(vehicle)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                // All expiry alerts (licence, insurance, emission) — deduplicated
+                ForEach(expiryAlerts.prefix(4)) { item in
+                    expiryAlertRow(item)
                 }
             }
         }
-        
+
+    }
+
+    /// Renders one expiry alert row, navigating to vehicle detail when possible.
+    @ViewBuilder
+    private func expiryAlertRow(_ item: ManagerNotificationItem) -> some View {
+        let vehicleIdStr: String? = {
+            if item.id.hasPrefix("licence-") {
+                return String(item.id.dropFirst("licence-".count))
+            } else if item.id.hasPrefix("insurance-") {
+                return String(item.id.dropFirst("insurance-".count))
+            }
+            return nil
+        }()
+        let vehicle = vehicleIdStr.flatMap { uid in
+            fleetViewModel.vehicles.first { $0.id?.uuidString == uid }
+        }
+        if let vehicle {
+            NavigationLink(destination: VehicleDetailView(vehicle: vehicle)
+                            .environmentObject(authViewModel)
+                            .environmentObject(fleetViewModel)) {
+                alertRow(
+                    icon: "doc.fill",
+                    iconBg: item.level.background,
+                    iconColour: item.level.color,
+                    title: item.title,
+                    subtitle: item.subtitle
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            alertRow(
+                icon: "doc.fill",
+                iconBg: item.level.background,
+                iconColour: item.level.color,
+                title: item.title,
+                subtitle: item.subtitle
+            )
+        }
     }
 
     /// Builds a single urgent alert row.
@@ -931,9 +985,13 @@ struct ManagerHomeView: View {
         }.count
 
         // Reschedule or fire expiry push notifications for all vehicle documents.
+        // Deduplicate by registration first so CoreData duplicate records for the
+        // same physical vehicle don't fire two separate push notifications.
+        var seenVehicleRegs = Set<String>()
         for vehicle in fleetViewModel.vehicles {
             guard let vehicleId = vehicle.id else { continue }
             let reg = vehicle.registration ?? "Vehicle"
+            guard seenVehicleRegs.insert(reg).inserted else { continue }
             if let insuranceExpiry = vehicle.insuranceExpiry {
                 NotificationService.shared.rescheduleExpiryIfNeeded(
                     vehicleRegistration: reg,
@@ -1046,7 +1104,12 @@ struct ManagerHomeView: View {
         fuelReq.predicate = dateRange
         fuelReq.sortDescriptors = [
             NSSortDescriptor(key: "date", ascending: false)]
-        todayFuelLogs = (try? context.fetch(fuelReq)) ?? []
+        let allFuelToday = (try? context.fetch(fuelReq)) ?? []
+        var seenFuelIds = Set<UUID>()
+        todayFuelLogs = allFuelToday.filter { log in
+            guard let id = log.id else { return false }
+            return seenFuelIds.insert(id).inserted
+        }
 
         let faultReq = FaultReportEntity.fetchRequest()
         faultReq.predicate = NSPredicate(

@@ -27,6 +27,7 @@ final class AuthViewModel: ObservableObject {
     private let authService: AuthService
     private let firestoreProvider: () -> Firestore
     private var authStateHandle: AuthStateDidChangeListenerHandle?
+    private var userDocumentListener: ListenerRegistration?
     private var didStartAuthStateListener: Bool = false
 
     // MARK: - Initializer
@@ -117,8 +118,12 @@ final class AuthViewModel: ObservableObject {
             return
         }
 
+        // Normalize before storing — the Firestore path uses the trimmed value, so the
+        // user document must store the same trimmed value for sameFleetId() to match.
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+
         do {
-            try await authService.register(name: name, email: email, password: password, role: role, fleetId: fleetId)
+            try await authService.register(name: name, email: email, password: password, role: role, fleetId: normalizedFleetId)
             try await refreshCurrentSession()
         } catch {
             errorMessage = error.localizedDescription
@@ -139,6 +144,7 @@ final class AuthViewModel: ObservableObject {
 
     /// Signs out the current user and resets all auth-related view model state.
     func signOut() {
+        stopUserDocumentListener()
         do {
             try authService.signOut()
             resetAuthState()
@@ -160,11 +166,44 @@ final class AuthViewModel: ObservableObject {
                     self.currentUID = user.uid
                     self.isAuthenticated = true
                     await self.loadUserMetadata(uid: user.uid)
+                    self.startUserDocumentListener(uid: user.uid)
                 } else {
+                    self.stopUserDocumentListener()
                     self.resetAuthState()
                 }
             }
         }
+    }
+
+    /// Starts a real-time listener on the user document so assignedVehicleId
+    /// updates immediately when a manager assigns a vehicle while the driver is logged in.
+    private func startUserDocumentListener(uid: String) {
+        userDocumentListener?.remove()
+        userDocumentListener = firestoreProvider()
+            .collection("users")
+            .document(uid)
+            .addSnapshotListener { [weak self] snapshot, _ in
+                guard let self, let data = snapshot?.data() else { return }
+
+                Task { @MainActor in
+                    let newVehicleId = (data["assignedVehicleId"] as? String ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if self.assignedVehicleId != newVehicleId {
+                        self.assignedVehicleId = newVehicleId
+                    }
+
+                    let newName = (data["name"] as? String ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !newName.isEmpty, self.currentUserName != newName {
+                        self.currentUserName = newName
+                    }
+                }
+            }
+    }
+
+    private func stopUserDocumentListener() {
+        userDocumentListener?.remove()
+        userDocumentListener = nil
     }
 
     /// Refreshes local auth state from the currently signed-in Firebase user.
@@ -180,6 +219,7 @@ final class AuthViewModel: ObservableObject {
         currentUID = user.uid
         isAuthenticated = true
         await loadUserMetadata(uid: user.uid)
+        startUserDocumentListener(uid: user.uid)
     }
 
     /// Loads role and fleet metadata for a user from Firestore.

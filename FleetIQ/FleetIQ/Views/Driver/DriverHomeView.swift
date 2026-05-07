@@ -105,7 +105,9 @@ struct DriverHomeView: View {
 
                     let unresolved = driverFaultVM.myFaults.filter {
                         let s = ($0.status ?? "open").lowercased()
-                        return s != "open" && s != "resolved" && s != "acknowledged"
+                        guard s != "open" && s != "resolved" && s != "acknowledged" else { return false }
+                        let id = $0.id?.uuidString ?? ""
+                        return !driverFaultVM.readNotificationIds.contains(id)
                     }.count
                     
                     let badgeCount = unresolved + viewModel.expiredDocsSummary.count
@@ -458,7 +460,7 @@ private struct DriverNotificationsView: View {
                     Section("Expiring Documents") {
                         ForEach(expiredDocsSummary, id: \.self) { doc in
                             HStack(spacing: 12) {
-                                Image(systemName: "doc.fill.badge.exclamationmark")
+                                Image(systemName: "doc.badge.exclamationmark")
                                     .foregroundColor(doc.contains("Expired") ? .statusOverdue : .statusDueSoon)
                                     .font(.title3)
                                     .frame(width: 32, height: 32)
@@ -495,7 +497,9 @@ private struct DriverNotificationsView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if faultVM.myFaults.contains(where: {
                         let s = ($0.status ?? "open").lowercased()
-                        return s != "open" && s != "resolved" && s != "acknowledged"
+                        guard s != "open" && s != "resolved" && s != "acknowledged" else { return false }
+                        let id = $0.id?.uuidString ?? ""
+                        return !faultVM.readNotificationIds.contains(id)
                     }) {
                         Button("Mark All as Read") {
                             markAllAsRead()
@@ -510,20 +514,7 @@ private struct DriverNotificationsView: View {
     }
 
     private func markAllAsRead() {
-        let unreadFaults = faultVM.myFaults.filter { fault in
-            let s = (fault.status ?? "open").lowercased()
-            return s != "open" && s != "resolved" && s != "acknowledged"
-        }
-        
-        for fault in unreadFaults {
-            Task {
-                try? await faultVM.updateStatus(
-                    fault: fault,
-                    status: "acknowledged",
-                    fleetId: fleetId
-                )
-            }
-        }
+        faultVM.markNotificationsRead()
     }
 
     private func notificationRow(
