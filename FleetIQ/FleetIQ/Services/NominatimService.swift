@@ -5,22 +5,21 @@
 //  
 //
 
-// MARK: - Why Nominatim and not MKLocalSearch
-// MKLocalSearch uses Apple Maps POI data.
-// Apple Maps has NO POI coverage for Sri Lanka.
-// MKLocalSearch returns zero results for Sri Lanka.
-// Nominatim OpenStreetMap API has full Sri Lanka coverage.
-// Called via URLSession - zero third-party SDKs imported.
-// MapKit used for ALL map rendering and annotation display.
-// CoreLocation: satisfies "communicate with phone sensors"
-// URLSession + Nominatim: satisfies "interact with external APIs"
+// MARK: - Garage search strategy
+// 1. Try MKLocalSearch (Apple Maps) first — has phone numbers, works in supported countries.
+// 2. If Apple Maps returns zero results (e.g. Sri Lanka has no POI coverage), fall back to
+//    Nominatim via the OpenStreetMap Overpass API which has full Sri Lanka coverage.
+// MapKit: map rendering + Apple Maps POI search
+// CoreLocation: distance calculations (phone sensor interaction)
+// URLSession + Nominatim: external API fallback
 //
 // Simulator testing:
 // Simulator menu -> Features -> Location -> Custom Location
-// Use the fault's current area in the simulator, then widen the radius if no garages appear.
+// Use the fault's current area, then widen the Nominatim radius if no garages appear.
 
 import Foundation
 import CoreLocation
+import MapKit
 
 struct NominatimResult: Codable, Identifiable {
     var id: UUID = UUID()
@@ -109,21 +108,23 @@ final class NominatimService {
     private init() {}
 
     /// Finds nearest vehicle repair garages near a coordinate.
-    /// Uses OpenStreetMap Overpass API via URLSession and expands the search radius if needed.
-    /// No third-party SDK imported.
+    /// Tries Apple Maps (MKLocalSearch) first; falls back to Overpass/Nominatim for
+    /// regions with no Apple Maps POI coverage (e.g. Sri Lanka).
     func findNearestGarages(
         latitude: Double,
         longitude: Double,
         limit: Int = 3
     ) async throws -> [NominatimResult] {
-        let searchPlan: [Double] = [
-            3,
-            8,
-            15,
-            30,
-            50
-        ]
+        let appleMapsResults = await searchGaragesAppleMaps(
+            latitude: latitude,
+            longitude: longitude,
+            limit: limit
+        )
+        if !appleMapsResults.isEmpty {
+            return appleMapsResults
+        }
 
+        let searchPlan: [Double] = [3, 8, 15, 30, 50]
         for radiusKm in searchPlan {
             let results = try await searchGarages(
                 latitude: latitude,
@@ -131,13 +132,71 @@ final class NominatimService {
                 limit: limit,
                 radiusKm: radiusKm
             )
-
             if !results.isEmpty {
                 return results
             }
         }
 
         return []
+    }
+
+    /// Searches for garages using Apple Maps (MKLocalSearch).
+    /// Returns an empty array if Apple Maps has no POI coverage for the region.
+    private func searchGaragesAppleMaps(
+        latitude: Double,
+        longitude: Double,
+        limit: Int
+    ) async -> [NominatimResult] {
+        let center = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        let region = MKCoordinateRegion(
+            center: center,
+            latitudinalMeters: 10_000,
+            longitudinalMeters: 10_000
+        )
+
+        var allItems: [MKMapItem] = []
+        let queries = ["car repair", "auto garage", "mechanic"]
+
+        for query in queries {
+            let request = MKLocalSearch.Request()
+            request.naturalLanguageQuery = query
+            request.region = region
+            request.resultTypes = .pointOfInterest
+
+            let items = await withCheckedContinuation { (continuation: CheckedContinuation<[MKMapItem], Never>) in
+                MKLocalSearch(request: request).start { response, _ in
+                    continuation.resume(returning: response?.mapItems ?? [])
+                }
+            }
+            allItems.append(contentsOf: items)
+        }
+
+        // Deduplicate items that are within 50 m of each other
+        var unique: [MKMapItem] = []
+        for item in allItems {
+            let alreadyPresent = unique.contains {
+                distanceKm(from: $0.placemark.coordinate, to: item.placemark.coordinate) < 0.05
+            }
+            if !alreadyPresent { unique.append(item) }
+        }
+
+        let driverCoordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        return Array(
+            unique
+                .sorted {
+                    distanceKm(from: driverCoordinate, to: $0.placemark.coordinate)
+                        < distanceKm(from: driverCoordinate, to: $1.placemark.coordinate)
+                }
+                .prefix(limit)
+                .map { item in
+                    NominatimResult(
+                        displayName: item.name ?? "Nearby Garage",
+                        lat: String(item.placemark.coordinate.latitude),
+                        lon: String(item.placemark.coordinate.longitude),
+                        phone: item.phoneNumber
+                    )
+                }
+        )
     }
 
     private func searchGarages(
@@ -164,7 +223,7 @@ final class NominatimService {
             "FleetIQ/1.0 University Project",
             forHTTPHeaderField: "User-Agent")
         request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 10
+        request.timeoutInterval = 30
 
         let (data, _) = try await URLSession.shared.data(for: request)
 
