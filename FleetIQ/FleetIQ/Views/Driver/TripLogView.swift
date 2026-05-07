@@ -200,11 +200,21 @@ private struct AddTripLogSheet: View {
                     TextField("Purpose", text: $purpose)
                     TextField("Destination", text: $destination)
 
-                    TextField("Start Mileage (km)", text: $startMileage)
-                        .keyboardType(.decimalPad)
+                    HStack {
+                        Text("Start Mileage")
+                        Spacer()
+                        TextField("0", text: $startMileage)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
 
-                    TextField("End Mileage (km)", text: $endMileage)
-                        .keyboardType(.decimalPad)
+                    HStack {
+                        Text("End Mileage")
+                        Spacer()
+                        TextField("0", text: $endMileage)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
                 }
 
                 if !localError.isEmpty {

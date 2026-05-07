@@ -13,6 +13,7 @@ struct ManageDriversView: View {
     @EnvironmentObject private var authViewModel: AuthViewModel
     @EnvironmentObject private var fleetViewModel: FleetViewModel
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.dismiss) private var dismiss
 
     @State private var drivers: [FleetDriverUser] = []
     @State private var searchText = ""
@@ -78,7 +79,9 @@ struct ManageDriversView: View {
                             .foregroundColor(.secondary)
                     } else {
                         ForEach(assignedDrivers, id: \.userId) { driver in
-                            driverRow(driver)
+                            NavigationLink(destination: DriverDetailView(driver: driver)) {
+                                driverRow(driver)
+                            }
                         }
                     }
                 }
@@ -89,7 +92,9 @@ struct ManageDriversView: View {
                             .foregroundColor(.secondary)
                     } else {
                         ForEach(unassignedDrivers, id: \.userId) { driver in
-                            driverRow(driver)
+                            NavigationLink(destination: DriverDetailView(driver: driver)) {
+                                driverRow(driver)
+                            }
                         }
                     }
                 }
@@ -99,10 +104,8 @@ struct ManageDriversView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        showAddVehicle = true
-                    } label: {
-                        Label("Add Vehicle", systemImage: "car.fill")
+                    Button("Back") {
+                        dismiss()
                     }
                 }
 
@@ -136,6 +139,11 @@ struct ManageDriversView: View {
             .task(id: authViewModel.fleetId) {
                 await loadDrivers()
             }
+            .onAppear {
+                Task {
+                    await loadDrivers()
+                }
+            }
         }
     }
 
@@ -168,10 +176,6 @@ struct ManageDriversView: View {
             Spacer()
 
             statusChip(for: driver)
-
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
         .padding(.vertical, 4)
     }

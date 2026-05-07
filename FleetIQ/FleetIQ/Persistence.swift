@@ -55,4 +55,21 @@ struct PersistenceController {
             fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
         }
     }
+    // MARK: - Clear Data
+    /// Clears all stored CoreData entities. Should be called upon user logout to prevent data leaking between accounts.
+    func clearAllData() {
+        let entities = container.managedObjectModel.entities
+        for entity in entities {
+            if let name = entity.name {
+                let fetchRequest: NSFetchRequest<NSFetchRequestResult> = NSFetchRequest(entityName: name)
+                let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+                do {
+                    try viewContext.execute(deleteRequest)
+                } catch {
+                    print("Failed to delete entity \(name): \(error)")
+                }
+            }
+        }
+        viewContext.reset()
+    }
 }

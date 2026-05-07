@@ -20,6 +20,7 @@ struct CostReportView: View {
     var body: some View {
         List {
             summarySection
+            categoryBreakdownSection
             monthlyBreakdownSection
             recentExpensesSection
         }
@@ -49,7 +50,27 @@ struct CostReportView: View {
         Section("SUMMARY") {
             summaryRow(title: "Service Cost", value: totalServiceCost)
             summaryRow(title: "Fuel Cost", value: totalFuelCost)
-            summaryRow(title: "Total Cost", value: totalServiceCost + totalFuelCost, emphasized: true)
+            summaryRow(title: "Total Cost", value: totalCost, emphasized: true)
+            summaryRow(title: "Monthly Average", value: monthlyAverage)
+            HStack {
+                Text("Cost per km")
+                Spacer()
+                Text("LKR \(String(format: "%.2f", costPerKm))")
+                    .fontWeight(.semibold)
+            }
+        }
+    }
+
+    private var categoryBreakdownSection: some View {
+        Section("CATEGORY BREAKDOWN") {
+            if categoryBreakdown.isEmpty {
+                Text("No data")
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(categoryBreakdown.sorted(by: { $0.value > $1.value }), id: \.key) { key, value in
+                    summaryRow(title: key, value: value)
+                }
+            }
         }
     }
 

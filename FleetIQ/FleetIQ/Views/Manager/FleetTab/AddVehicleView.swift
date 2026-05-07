@@ -49,7 +49,6 @@ struct AddVehicleView: View {
     @State private var makeError = ""
     @State private var modelError = ""
     @State private var mileageError = ""
-    @State private var emissionError = ""
 
     // MARK: - OCR State
     @State private var registrationItem: PhotosPickerItem?
@@ -71,6 +70,7 @@ struct AddVehicleView: View {
     @State private var isLoadingDrivers = false
     @State private var driverLoadError = ""
     @State private var showManageDrivers = false
+    @State private var showSaveError = false
 
     // MARK: - Constants
     let fuelTypes = ["Diesel", "Petrol", "Hybrid", "Electric", "CNG"]
@@ -160,19 +160,7 @@ struct AddVehicleView: View {
                             }
                         }
 
-                        if isScanning {
-                            HStack(spacing: 10) {
-                                ProgressView()
-                                Text("Extracting details from image...")
-                                    .font(.body)
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        } else if !scanMessage.isEmpty {
-                            Text(scanMessage)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
+                        scanStatusRow
                     }
                 }
 
@@ -346,12 +334,6 @@ struct AddVehicleView: View {
                                 displayedComponents: .date
                             )
                         }
-
-                        if !emissionError.isEmpty {
-                            Text(emissionError)
-                                .font(.caption)
-                                .foregroundColor(.statusOverdue)
-                        }
                     }
                 }
             }
@@ -398,12 +380,18 @@ struct AddVehicleView: View {
                 if !requiresEmissionTest {
                     hasEmissionDate = false
                     emissionVerified = false
-                    emissionError = ""
                 }
             }
             .disabled(isSaving)
             .task(id: authViewModel.fleetId) {
                 await loadDrivers()
+            }
+            .alert("Save Failed", isPresented: $showSaveError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(fleetViewModel.errorMessage.isEmpty
+                     ? "Vehicle could not be saved. Please check your connection and try again."
+                     : fleetViewModel.errorMessage)
             }
             .sheet(isPresented: $showManageDrivers, onDismiss: {
                 Task {
@@ -553,7 +541,6 @@ struct AddVehicleView: View {
         makeError = ""
         modelError = ""
         mileageError = ""
-        emissionError = ""
 
         let normalizedRegistration = registration.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedMake = make.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -576,15 +563,10 @@ struct AddVehicleView: View {
             mileageError = "Enter a valid mileage value."
         }
 
-        if requiresEmissionTest && !hasEmissionDate {
-            emissionError = "Emission test expiry is required for non-hybrid/electric vehicles."
-        }
-
         return registrationError.isEmpty &&
             makeError.isEmpty &&
             modelError.isEmpty &&
-            mileageError.isEmpty &&
-            emissionError.isEmpty
+            mileageError.isEmpty
     }
 
     // MARK: - Save Action
@@ -618,13 +600,20 @@ struct AddVehicleView: View {
             fleetId: authViewModel.fleetId
         )
 
-        // If vehicle creation succeeded, upload any scanned documents into
-        // the Document Wallet so they are associated with the newly created vehicle.
-        if let vehicleId = createdVehicleId {
-            await uploadScannedDocuments(for: vehicleId, registration: normalizedRegistration)
+        isSaving = false
+
+        guard let vehicleId = createdVehicleId else {
+            showSaveError = true
+            return
         }
 
-        isSaving = false
+        // Upload any scanned documents into the Document Wallet in the background
+        // This significantly speeds up the perceived save time since the user
+        // doesn't have to wait for the Firebase image uploads to finish.
+        Task {
+            await uploadScannedDocuments(for: vehicleId, registration: normalizedRegistration)
+        }
+        
         dismiss()
     }
 
@@ -655,17 +644,6 @@ struct AddVehicleView: View {
                 let photoURL = try await firestoreService.uploadPhoto(image, path: storagePath)
 
                 guard let vehicleUUID = UUID(uuidString: vehicleId) else { return }
-                let context = PersistenceController.shared.viewContext
-                let entity = DocumentEntity(context: context)
-                let savedId = UUID()
-                entity.id = savedId
-                entity.vehicleId = vehicleUUID
-                entity.type = type
-                entity.expiryDate = expiry ?? Date()
-                entity.photoURL = photoURL
-
-                try context.save()
-
                 let docId = "\(vehicleId)_\(type)"
                 let firestorePayload: [String: Any] = [
                     "id": docId,
@@ -677,6 +655,17 @@ struct AddVehicleView: View {
                 ]
 
                 try await firestoreService.saveDocument(firestorePayload, fleetId: authViewModel.fleetId, docId: docId)
+
+                let context = PersistenceController.shared.viewContext
+                let entity = DocumentEntity(context: context)
+                let savedId = UUID()
+                entity.id = savedId
+                entity.vehicleId = vehicleUUID
+                entity.type = type
+                entity.expiryDate = expiry ?? Date()
+                entity.photoURL = photoURL
+
+                try context.save()
 
                 if let expiryDate = expiry {
                     NotificationService.shared.scheduleAllExpiryWarnings(
@@ -695,10 +684,63 @@ struct AddVehicleView: View {
         await uploadIfPresent(type: "insurance", item: insuranceItem, expiry: hasInsuranceDate ? insuranceExpiry : nil)
         await uploadIfPresent(type: "licence", item: licenceItem, expiry: hasLicenceDate ? licenceExpiry : nil)
         await uploadIfPresent(type: "emission", item: emissionItem, expiry: hasEmissionDate ? emissionExpiry : nil)
+
+        // Emission expiry set but no photo scanned — uploadIfPresent returned early
+        // because its guard requires a non-nil image. Save a photo-less DocumentEntity
+        // so that in-app alerts and push notifications still fire for the emission test.
+        if hasEmissionDate && emissionItem == nil,
+           let vehicleUUID = UUID(uuidString: vehicleId) {
+            let docId = "\(vehicleId)_emission"
+            let payload: [String: Any] = [
+                "id": docId,
+                "vehicleId": vehicleId,
+                "type": "emission",
+                "expiryDate": Timestamp(date: emissionExpiry),
+                "photoURL": "",
+                "updatedAt": Timestamp(date: Date())
+            ]
+            do {
+                try await firestoreService.saveDocument(payload, fleetId: authViewModel.fleetId, docId: docId)
+                let ctx = PersistenceController.shared.viewContext
+                let entity = DocumentEntity(context: ctx)
+                entity.id = UUID()
+                entity.vehicleId = vehicleUUID
+                entity.type = "emission"
+                entity.expiryDate = emissionExpiry
+                entity.photoURL = ""
+                try ctx.save()
+                NotificationService.shared.scheduleAllExpiryWarnings(
+                    vehicleRegistration: normalizedRegistration,
+                    documentType: "emission",
+                    expiryDate: emissionExpiry,
+                    vehicleId: vehicleUUID
+                )
+            } catch {
+                print("Emission expiry-only save failed: \(error)")
+            }
+        }
+
         // registration image isn't stored in wallet currently, skip it.
     }
 
     // MARK: - Reusable Rows
+
+    @ViewBuilder
+    private var scanStatusRow: some View {
+        if isScanning {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Extracting details from image...")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if !scanMessage.isEmpty {
+            Text(scanMessage)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
 
     /// Builds a verified-step row that mirrors OCR checklist status.
     /// - Parameters:

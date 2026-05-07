@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import FirebaseFirestore
 
 // MARK: - Driver Records View
 struct DriverRecordsView: View {
@@ -17,6 +18,8 @@ struct DriverRecordsView: View {
     @State private var trips: [TripLogEntity] = []
     @State private var fuelLogs: [FuelLogEntity] = []
     @State private var selectedFilter: DriverRecordFilter = .all
+
+    private let firestoreService = FirestoreService.shared
 
     private var normalizedVehicleId: String {
         authViewModel.assignedVehicleId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -101,9 +104,11 @@ struct DriverRecordsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task(id: normalizedVehicleId) {
                 loadRecords()
+                await syncFromFirestore()
             }
             .refreshable {
                 loadRecords()
+                await syncFromFirestore()
             }
         }
     }
@@ -204,6 +209,56 @@ struct DriverRecordsView: View {
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, 3)
+    }
+
+    private func syncFromFirestore() async {
+        guard let vehicleUUID = UUID(uuidString: normalizedVehicleId) else { return }
+        let fleetId = authViewModel.fleetId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fleetId.isEmpty else { return }
+
+        // Sync trip logs
+        if let tripDocs = try? await firestoreService.fetchTripLogs(
+            fleetId: fleetId,
+            vehicleId: vehicleUUID.uuidString) {
+            for doc in tripDocs {
+                let data = doc.data()
+                let id = (data["id"] as? String).flatMap(UUID.init) ?? UUID(uuidString: doc.documentID) ?? UUID()
+                let req = NSFetchRequest<TripLogEntity>(entityName: "TripLogEntity")
+                req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+                req.fetchLimit = 1
+                let entity = (try? context.fetch(req).first) ?? TripLogEntity(context: context)
+                entity.id = id
+                entity.vehicleId = vehicleUUID
+                entity.driverId = data["driverId"] as? String ?? ""
+                entity.startMileage = (data["startMileage"] as? Double) ?? 0
+                entity.endMileage = (data["endMileage"] as? Double) ?? 0
+                entity.distanceKm = (data["distanceKm"] as? Double) ?? 0
+                if let ts = data["date"] as? Timestamp { entity.date = ts.dateValue() }
+            }
+        }
+
+        // Sync fuel logs
+        if let fuelDocs = try? await firestoreService.fetchFuelLogs(
+            fleetId: fleetId,
+            vehicleId: vehicleUUID.uuidString) {
+            for doc in fuelDocs {
+                let data = doc.data()
+                let id = (data["id"] as? String).flatMap(UUID.init) ?? UUID(uuidString: doc.documentID) ?? UUID()
+                let req = NSFetchRequest<FuelLogEntity>(entityName: "FuelLogEntity")
+                req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+                req.fetchLimit = 1
+                let entity = (try? context.fetch(req).first) ?? FuelLogEntity(context: context)
+                entity.id = id
+                entity.vehicleId = vehicleUUID
+                entity.litres = (data["litres"] as? Double) ?? 0
+                entity.totalCostLKR = (data["totalCostLKR"] as? Double) ?? 0
+                if let ts = data["date"] as? Timestamp { entity.date = ts.dateValue() }
+            }
+        }
+
+        try? context.save()
+        loadRecords()
     }
 
     private func loadRecords() {

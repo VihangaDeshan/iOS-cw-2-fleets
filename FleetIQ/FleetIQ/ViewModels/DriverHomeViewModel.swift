@@ -21,6 +21,10 @@ final class DriverHomeViewModel: ObservableObject {
     @Published var todayKmDriven: Double = 0
     @Published var isLoadingVehicle: Bool = false
     @Published var todayActivityItems: [DriverActivityItem] = []
+    
+    @Published var expiredDocsSummary: [String] = []
+    @Published var showExpiredDocsAlert: Bool = false
+    private var hasCheckedExpiredDocs = false
 
     // MARK: - Private Properties
     private let context = PersistenceController.shared.viewContext
@@ -46,6 +50,14 @@ final class DriverHomeViewModel: ObservableObject {
             vehicleId: normalizedVehicleId,
             driverId: normalizedDriverId
         )
+
+        Task {
+            await syncAnalyticsDocs(fleetId: normalizedFleetId, vehicleId: normalizedVehicleId)
+            self.loadTodayStats(vehicleId: normalizedVehicleId, driverId: normalizedDriverId)
+            
+            // Also notify UI that background sync is done so dependent views can refresh
+            NotificationCenter.default.post(name: Notification.Name("DriverAnalyticsDidSync"), object: nil)
+        }
     }
 
     /// Stops active listeners when driver screens are no longer visible.
@@ -54,7 +66,95 @@ final class DriverHomeViewModel: ObservableObject {
         vehicleListener = nil
     }
 
-    /// Predicts next service mileage from historical service intervals.
+    /// Fetches all service, fuel, and trip logs for the assigned vehicle to populate CoreData locally.
+    private func syncAnalyticsDocs(fleetId: String, vehicleId: String) async {
+        guard !fleetId.isEmpty, !vehicleId.isEmpty else { return }
+        
+        do {
+            // 1. Service Records
+            if let serviceDocs = try? await firestoreService.fetchServiceRecords(fleetId: fleetId, vehicleId: vehicleId) {
+                for doc in serviceDocs {
+                    let data = doc.data()
+                    guard let idStr = data["id"] as? String,
+                          let recordUUID = UUID(uuidString: idStr),
+                          let vehicleIdStr = data["vehicleId"] as? String,
+                          let vehicleUUID = UUID(uuidString: vehicleIdStr) else { continue }
+                    
+                    let request = NSFetchRequest<ServiceRecordEntity>(entityName: "ServiceRecordEntity")
+                    request.predicate = NSPredicate(format: "id == %@", recordUUID as CVarArg)
+                    request.fetchLimit = 1
+                    
+                    let entity = (try? context.fetch(request).first) ?? ServiceRecordEntity(context: context)
+                    entity.id = recordUUID
+                    entity.vehicleId = vehicleUUID
+                    if let ts = data["date"] as? Timestamp { entity.date = ts.dateValue() }
+                    entity.mileageAtService = (data["mileageAtService"] as? Double) ?? 0
+                    entity.garageName = data["garageName"] as? String ?? ""
+                    entity.serviceType = data["serviceType"] as? String ?? ""
+                    entity.costLKR = (data["costLKR"] as? Double) ?? 0
+                    entity.notes = data["notes"] as? String ?? ""
+                }
+            }
+            
+            // 2. Fuel Logs
+            if let fuelDocs = try? await firestoreService.fetchFuelLogs(fleetId: fleetId, vehicleId: vehicleId) {
+                for doc in fuelDocs {
+                    let data = doc.data()
+                    guard let idStr = data["id"] as? String,
+                          let logUUID = UUID(uuidString: idStr),
+                          let vehicleIdStr = data["vehicleId"] as? String,
+                          let vehicleUUID = UUID(uuidString: vehicleIdStr) else { continue }
+                    
+                    let request = NSFetchRequest<FuelLogEntity>(entityName: "FuelLogEntity")
+                    request.predicate = NSPredicate(format: "id == %@", logUUID as CVarArg)
+                    request.fetchLimit = 1
+                    
+                    let entity = (try? context.fetch(request).first) ?? FuelLogEntity(context: context)
+                    entity.id = logUUID
+                    entity.vehicleId = vehicleUUID
+                    if let ts = data["date"] as? Timestamp { entity.date = ts.dateValue() }
+                    entity.mileage = (data["mileage"] as? Double) ?? 0
+                    entity.litres = (data["litres"] as? Double) ?? 0
+                    entity.totalCostLKR = (data["totalCostLKR"] as? Double) ?? 0
+                    entity.costPerLitre = (data["costPerLitre"] as? Double) ?? 0
+                    entity.kmPerLitre = (data["kmPerLitre"] as? Double) ?? 0
+                }
+            }
+            
+            // 3. Trip Logs
+            if let tripDocs = try? await firestoreService.fetchTripLogs(fleetId: fleetId, vehicleId: vehicleId) {
+                for doc in tripDocs {
+                    let data = doc.data()
+                    guard let idStr = data["id"] as? String,
+                          let logUUID = UUID(uuidString: idStr),
+                          let vehicleIdStr = data["vehicleId"] as? String,
+                          let vehicleUUID = UUID(uuidString: vehicleIdStr) else { continue }
+                          
+                    let request = NSFetchRequest<TripLogEntity>(entityName: "TripLogEntity")
+                    request.predicate = NSPredicate(format: "id == %@", logUUID as CVarArg)
+                    request.fetchLimit = 1
+                    
+                    let entity = (try? context.fetch(request).first) ?? TripLogEntity(context: context)
+                    entity.id = logUUID
+                    entity.vehicleId = vehicleUUID
+                    entity.driverId = data["driverId"] as? String ?? ""
+                    entity.purpose = data["purpose"] as? String ?? ""
+                    entity.destination = data["destination"] as? String ?? ""
+                    entity.startMileage = (data["startMileage"] as? Double) ?? 0
+                    entity.endMileage = (data["endMileage"] as? Double) ?? 0
+                    entity.distanceKm = (data["distanceKm"] as? Double) ?? 0
+                    if let ts = data["date"] as? Timestamp { entity.date = ts.dateValue() }
+                }
+            }
+            
+            try context.save()
+            
+        } catch {
+            print("Failed to sync driver analytics: \(error)")
+        }
+    }
+
+    /// Predicts next full service mileage from historical service intervals.
     func predictedNextServiceMileage(for vehicle: VehicleEntity) -> Double {
         guard let vehicleId = vehicle.id else {
             return vehicle.currentMileage + 5000
@@ -62,39 +162,58 @@ final class DriverHomeViewModel: ObservableObject {
 
         let request = NSFetchRequest<ServiceRecordEntity>(entityName: "ServiceRecordEntity")
         request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
-        request.sortDescriptors = [NSSortDescriptor(key: "mileageAtService", ascending: true)]
+        request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
 
         do {
             let records = try context.fetch(request)
-            guard records.count >= 2 else {
-                return vehicle.currentMileage + 5000
-            }
-
-            var intervals: [Double] = []
-            for index in 1..<records.count {
-                let interval = records[index].mileageAtService - records[index - 1].mileageAtService
-                if interval > 0 {
-                    intervals.append(interval)
-                }
-            }
-
-            guard !intervals.isEmpty else {
-                return vehicle.currentMileage + 5000
-            }
-
-            let averageInterval = intervals.reduce(0, +) / Double(intervals.count)
-            let lastServiceMileage = records.last?.mileageAtService ?? vehicle.currentMileage
-            return lastServiceMileage + averageInterval
+            let lastFullService = records.first { ($0.serviceType ?? "").localizedCaseInsensitiveContains("Full Service") }
+            let lastMileage = lastFullService?.mileageAtService ?? (records.first?.mileageAtService ?? vehicle.currentMileage)
+            return lastMileage + 5000
         } catch {
             return vehicle.currentMileage + 5000
         }
+    }
+    
+    /// Calculates average daily kilometers based on vehicle history.
+    private func averageDailyKm(for vehicle: VehicleEntity) -> Double {
+        guard let vehicleId = vehicle.id else {
+            return 80
+        }
+        
+        let request = NSFetchRequest<ServiceRecordEntity>(entityName: "ServiceRecordEntity")
+        request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
+        request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
+        
+        do {
+            let records = try context.fetch(request)
+            guard let first = records.first, let last = records.last, first.id != last.id,
+                  let firstDate = first.date, let lastDate = last.date else {
+                return 80 // fallback
+            }
+            
+            let days = Calendar.current.dateComponents([.day], from: firstDate, to: lastDate).day ?? 0
+            let kmDiff = last.mileageAtService - first.mileageAtService
+            
+            if days > 0 && kmDiff > 0 {
+                return kmDiff / Double(days)
+            }
+        } catch {}
+        
+        return 80
+    }
+
+    /// Returns days remaining until predicted service based on the dynamic true daily km.
+    func daysUntilService(for vehicle: VehicleEntity) -> Int {
+        let remainingMileage = predictedNextServiceMileage(for: vehicle) - vehicle.currentMileage
+        let dailyKm = averageDailyKm(for: vehicle)
+        return Int((remainingMileage / max(1, dailyKm)).rounded(.down))
     }
 
     /// Returns a service status label based on predicted service due date.
     func serviceStatus(for vehicle: VehicleEntity) -> String {
         let remainingMileage = predictedNextServiceMileage(for: vehicle) - vehicle.currentMileage
-        let assumedDailyMileage = 15.0
-        let days = Int((remainingMileage / assumedDailyMileage).rounded(.down))
+        let dailyKm = averageDailyKm(for: vehicle)
+        let days = Int((remainingMileage / max(1, dailyKm)).rounded(.down))
 
         if days < 0 {
             return "Overdue"
@@ -137,7 +256,57 @@ final class DriverHomeViewModel: ObservableObject {
                 self.applyVehicleSnapshot(data: data, vehicleId: vehicleId)
                 self.loadAssignedVehicleFromCoreData(vehicleId: vehicleId)
                 self.loadTodayStats(vehicleId: vehicleId, driverId: driverId)
+                self.triggerNotifications()
+                self.checkAndAlertExpiredDocuments()
             }
+        }
+    }
+
+    private func triggerNotifications() {
+        guard let vehicle = assignedVehicle else { return }
+        let reg = vehicle.registration ?? "Your Vehicle"
+        
+        if let ins = vehicle.insuranceExpiry {
+            NotificationService.shared.rescheduleExpiryIfNeeded(
+                vehicleRegistration: reg,
+                documentType: "Insurance",
+                expiryDate: ins,
+                vehicleId: vehicle.id ?? UUID()
+            )
+        }
+        
+        if let lic = vehicle.licenceExpiry {
+            NotificationService.shared.rescheduleExpiryIfNeeded(
+                vehicleRegistration: reg,
+                documentType: "Revenue Licence",
+                expiryDate: lic,
+                vehicleId: vehicle.id ?? UUID()
+            )
+        }
+    }
+
+    private func checkAndAlertExpiredDocuments() {
+        guard let vehicle = assignedVehicle, !hasCheckedExpiredDocs else { return }
+        hasCheckedExpiredDocs = true
+        var summary: [String] = []
+        
+        if let ins = vehicle.insuranceExpiry {
+            let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: ins)).day ?? 0
+            if days <= 30 {
+                summary.append("Insurance (\(days < 0 ? "Expired" : "Expires in \(days) days"))")
+            }
+        }
+        
+        if let lic = vehicle.licenceExpiry {
+            let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: lic)).day ?? 0
+            if days <= 30 {
+                summary.append("Revenue Licence (\(days < 0 ? "Expired" : "Expires in \(days) days"))")
+            }
+        }
+        
+        if !summary.isEmpty {
+            self.expiredDocsSummary = summary
+            self.showExpiredDocsAlert = true
         }
     }
 
@@ -161,46 +330,43 @@ final class DriverHomeViewModel: ObservableObject {
 
         let vehicleUUID = UUID(uuidString: vehicleId)
 
-        let tripRequest = NSFetchRequest<TripLogEntity>(entityName: "TripLogEntity")
+        let tripsToday: [TripLogEntity]
+        let fuelToday: [FuelLogEntity]
+
         if let vehicleUUID {
+            let tripRequest = NSFetchRequest<TripLogEntity>(entityName: "TripLogEntity")
             tripRequest.predicate = NSPredicate(
                 format: "date >= %@ AND date < %@ AND vehicleId == %@",
                 startOfDay as NSDate,
                 endOfDay as NSDate,
                 vehicleUUID as CVarArg
             )
-        } else {
-            tripRequest.predicate = NSPredicate(
-                format: "date >= %@ AND date < %@",
+            tripsToday = (try? context.fetch(tripRequest)) ?? []
+
+            let fuelRequest = NSFetchRequest<FuelLogEntity>(entityName: "FuelLogEntity")
+            fuelRequest.predicate = NSPredicate(
+                format: "date >= %@ AND date < %@ AND vehicleId == %@",
                 startOfDay as NSDate,
-                endOfDay as NSDate
+                endOfDay as NSDate,
+                vehicleUUID as CVarArg
             )
+            fuelToday = (try? context.fetch(fuelRequest)) ?? []
+        } else {
+            tripsToday = []
+            fuelToday = []
         }
 
-        let tripsToday = (try? context.fetch(tripRequest)) ?? []
         todayTrips = tripsToday.count
         todayKmDriven = tripsToday.reduce(0) { $0 + $1.distanceKm }
 
-        let fuelRequest = NSFetchRequest<FuelLogEntity>(entityName: "FuelLogEntity")
-        if let vehicleUUID {
-            fuelRequest.predicate = NSPredicate(
-                format: "date >= %@ AND date < %@ AND vehicleId == %@",
-                startOfDay as NSDate,
-                endOfDay as NSDate,
-                vehicleUUID as CVarArg
-            )
-        } else {
-            fuelRequest.predicate = NSPredicate(
-                format: "date >= %@ AND date < %@",
-                startOfDay as NSDate,
-                endOfDay as NSDate
-            )
+        var seenFuelIds = Set<UUID>()
+        let uniqueFuelToday = fuelToday.filter { log in
+            guard let id = log.id else { return false }
+            return seenFuelIds.insert(id).inserted
         }
+        todayFuelLogs = uniqueFuelToday.count
 
-        let fuelToday = (try? context.fetch(fuelRequest)) ?? []
-        todayFuelLogs = fuelToday.count
-
-        buildTodayActivityItems(trips: tripsToday, fuelLogs: fuelToday)
+        buildTodayActivityItems(trips: tripsToday, fuelLogs: uniqueFuelToday)
 
         let faultRequest = NSFetchRequest<FaultReportEntity>(entityName: "FaultReportEntity")
         if let vehicleUUID {

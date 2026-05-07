@@ -44,6 +44,45 @@ final class ServiceLogViewModel: ObservableObject {
         isLoading = false
     }
 
+    /// Fetches service records for a vehicle from Firestore and upserts into CoreData.
+    /// Call this alongside loadRecords to restore data after a fresh install.
+    func syncRecords(vehicleId: UUID, fleetId: String) async {
+        let normalizedFleetId = fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetId.isEmpty else { return }
+
+        guard let docs = try? await firestoreService.fetchServiceRecords(
+            fleetId: normalizedFleetId,
+            vehicleId: vehicleId.uuidString),
+              !docs.isEmpty else { return }
+
+        for doc in docs {
+            let data = doc.data()
+            guard let idStr = data["id"] as? String,
+                  let recordUUID = UUID(uuidString: idStr) else { continue }
+
+            let request = ServiceRecordEntity.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", recordUUID as CVarArg)
+            request.fetchLimit = 1
+
+            let entity = (try? context.fetch(request).first)
+                ?? ServiceRecordEntity(context: context)
+            entity.id = recordUUID
+            entity.vehicleId = vehicleId
+
+            if let ts = data["date"] as? Timestamp {
+                entity.date = ts.dateValue()
+            }
+            entity.mileageAtService = (data["mileageAtService"] as? Double) ?? 0
+            entity.garageName = data["garageName"] as? String ?? ""
+            entity.serviceType = data["serviceType"] as? String ?? ""
+            entity.costLKR = (data["costLKR"] as? Double) ?? 0
+            entity.notes = data["notes"] as? String ?? ""
+        }
+
+        try? context.save()
+        loadRecords(for: vehicleId)
+    }
+
     // MARK: - Add Record
 
     /// Saves a new service record to CoreData and Firestore.
@@ -68,8 +107,32 @@ final class ServiceLogViewModel: ObservableObject {
     ) async {
         errorMessage = ""
 
+        let recordId = UUID()
+
+        let data: [String: Any] = [
+            "id": recordId.uuidString,
+            "vehicleId": vehicleId.uuidString,
+            "date": Timestamp(date: date),
+            "mileageAtService": mileage,
+            "garageName": garage,
+            "serviceType": serviceType,
+            "costLKR": cost,
+            "notes": notes
+        ]
+
+        do {
+            try await firestoreService.saveServiceRecord(
+                data,
+                fleetId: fleetId,
+                recordId: recordId.uuidString
+            )
+        } catch {
+            errorMessage = "Cloud sync failed. Record not saved locally."
+            return
+        }
+
         let record = ServiceRecordEntity(context: context)
-        record.id = UUID()
+        record.id = recordId
         record.vehicleId = vehicleId
         record.date = date
         record.mileageAtService = mileage
@@ -94,27 +157,6 @@ final class ServiceLogViewModel: ObservableObject {
             vehicleRegistration: vehicleRegistrationForId(vehicleId),
             predictedDate: predictedDate,
             vehicleId: vehicleId)
-
-        let data: [String: Any] = [
-            "id": record.id?.uuidString ?? "",
-            "vehicleId": vehicleId.uuidString,
-            "date": Timestamp(date: date),
-            "mileageAtService": mileage,
-            "garageName": garage,
-            "serviceType": serviceType,
-            "costLKR": cost,
-            "notes": notes
-        ]
-
-        do {
-            try await firestoreService.saveServiceRecord(
-                data,
-                fleetId: fleetId,
-                recordId: record.id?.uuidString ?? UUID().uuidString
-            )
-        } catch {
-            errorMessage = "Saved locally but cloud sync failed."
-        }
 
         loadRecords(for: vehicleId)
     }
@@ -174,6 +216,47 @@ final class ServiceLogViewModel: ObservableObject {
     }
 
     // MARK: - Smart Scheduler
+
+    var lastFullService: ServiceRecordEntity? {
+        records.first { ($0.serviceType ?? "").localizedCaseInsensitiveContains("Full Service") }
+    }
+
+    var isFullServiceOverdue: Bool {
+        guard let last = lastFullService, let date = last.date else {
+            return true
+        }
+        let threeMonthsAgo = Calendar.current.date(byAdding: .month, value: -3, to: Date()) ?? Date()
+        return date < threeMonthsAgo
+    }
+
+    var nextFullServiceMileage: Double {
+        let lastMileage = lastFullService?.mileageAtService ?? (records.first?.mileageAtService ?? 0)
+        return lastMileage + 5000
+    }
+
+    var nextFullServiceDate: Date {
+        let lastDate = lastFullService?.date ?? (records.first?.date ?? Date())
+        let dailyKm = averageDailyKm()
+        let days = Int(5000 / max(1, dailyKm))
+        return Calendar.current.date(byAdding: .day, value: days, to: lastDate) ?? Date()
+    }
+    
+    /// Calculates average daily kilometers based on history.
+    func averageDailyKm() -> Double {
+        let sorted = records.sorted { ($0.date ?? Date()) < ($1.date ?? Date()) }
+        guard let first = sorted.first, let last = sorted.last, first.id != last.id,
+              let firstDate = first.date, let lastDate = last.date else {
+            return 80 // fallback
+        }
+        
+        let days = Calendar.current.dateComponents([.day], from: firstDate, to: lastDate).day ?? 0
+        let kmDiff = last.mileageAtService - first.mileageAtService
+        
+        if days > 0 && kmDiff > 0 {
+            return kmDiff / Double(days)
+        }
+        return 80
+    }
 
     /// Calculates average service interval in kilometers.
     /// - Returns: Average interval or 5000 when insufficient history exists.

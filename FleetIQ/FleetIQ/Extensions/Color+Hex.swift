@@ -15,12 +15,15 @@ extension Color {
     static let statusActive = Color(hex: "34C759")
     static let statusDueSoon = Color(hex: "FF9500")
     static let statusOverdue = Color(hex: "FF3B30")
+    static let statusMustUpdate = Color(hex: "8E44AD")
     static let chipGreenBg = Color(hex: "E4F5EA")
     static let chipGreenText = Color(hex: "1A6E44")
     static let chipOrangeBg = Color(hex: "FFF3E0")
     static let chipOrangeText = Color(hex: "B06000")
     static let chipRedBg = Color(hex: "FFEAEA")
     static let chipRedText = Color(hex: "C00010")
+    static let chipPurpleBg = Color(hex: "F3E5F5")
+    static let chipPurpleText = Color(hex: "8E44AD")
     static let systemGroupedBg = Color(hex: "F2F2F7")
 
     /// Creates a color from a 6-character hex string.

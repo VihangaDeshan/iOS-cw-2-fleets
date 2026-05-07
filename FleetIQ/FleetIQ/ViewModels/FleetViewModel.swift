@@ -23,6 +23,8 @@ class FleetViewModel: ObservableObject {
     private var listener: ListenerRegistration?
     private let context = PersistenceController.shared.viewContext
     private let firestoreService = FirestoreService.shared
+    private var currentFleetId: String = ""
+    private var hasPerformedInitialBackfill = false
 
     // MARK: - Load
 
@@ -41,6 +43,9 @@ class FleetViewModel: ObservableObject {
             return
         }
 
+        currentFleetId = normalizedFleetId
+        hasPerformedInitialBackfill = false
+
         fetchFromCoreData()
         stopListening()
 
@@ -48,6 +53,10 @@ class FleetViewModel: ObservableObject {
             Task { @MainActor in
                 self?.syncFromFirestore(docs)
             }
+        }
+
+        Task {
+            await syncAnalyticsDocs(fleetId: normalizedFleetId)
         }
 
         isLoading = false
@@ -92,6 +101,134 @@ class FleetViewModel: ObservableObject {
             fetchFromCoreData()
         } catch {
             errorMessage = error.localizedDescription
+            return
+        }
+
+        // One-time backfill: upload any CoreData vehicles missing from Firestore
+        if !hasPerformedInitialBackfill && !currentFleetId.isEmpty {
+            hasPerformedInitialBackfill = true
+            let firestoreIds = Set(docs.map { $0.documentID })
+            Task {
+                await backfillMissingVehicles(firestoreIds: firestoreIds)
+            }
+        }
+    }
+
+    private func backfillMissingVehicles(firestoreIds: Set<String>) async {
+        let localOnly = vehicles.filter { vehicle in
+            guard let id = vehicle.id?.uuidString else { return false }
+            return !firestoreIds.contains(id)
+        }
+
+        for vehicle in localOnly {
+            guard let vehicleId = vehicle.id?.uuidString else { continue }
+
+            var payload: [String: Any] = [
+                "id": vehicleId,
+                "registration": vehicle.registration ?? "",
+                "make": vehicle.make ?? "",
+                "model": vehicle.model ?? "",
+                "year": Int(vehicle.year),
+                "fuelType": vehicle.fuelType ?? "",
+                "currentMileage": vehicle.currentMileage,
+                "assignedDriverId": vehicle.assignedDriverId ?? ""
+            ]
+
+            if let exp = vehicle.insuranceExpiry { payload["insuranceExpiry"] = Timestamp(date: exp) }
+            if let exp = vehicle.licenceExpiry { payload["licenceExpiry"] = Timestamp(date: exp) }
+            if let at = vehicle.createdAt { payload["createdAt"] = Timestamp(date: at) }
+
+            try? await firestoreService.saveVehicle(payload, fleetId: currentFleetId, vehicleId: vehicleId)
+        }
+    }
+
+    /// Fetches all service, fuel, and trip logs for the fleet to ensure local analytics are populated.
+    @MainActor
+    private func syncAnalyticsDocs(fleetId: String) async {
+        do {
+            // 1. Service Records
+            if let serviceDocs = try? await firestoreService.fetchServiceRecords(fleetId: fleetId) {
+                for doc in serviceDocs {
+                    let data = doc.data()
+                    guard let idStr = data["id"] as? String,
+                          let recordUUID = UUID(uuidString: idStr),
+                          let vehicleIdStr = data["vehicleId"] as? String,
+                          let vehicleUUID = UUID(uuidString: vehicleIdStr) else { continue }
+                    
+                    let request = NSFetchRequest<ServiceRecordEntity>(entityName: "ServiceRecordEntity")
+                    request.predicate = NSPredicate(format: "id == %@", recordUUID as CVarArg)
+                    request.fetchLimit = 1
+                    
+                    let entity = (try? context.fetch(request).first) ?? ServiceRecordEntity(context: context)
+                    entity.id = recordUUID
+                    entity.vehicleId = vehicleUUID
+                    if let ts = data["date"] as? Timestamp { entity.date = ts.dateValue() }
+                    entity.mileageAtService = (data["mileageAtService"] as? Double) ?? 0
+                    entity.garageName = data["garageName"] as? String ?? ""
+                    entity.serviceType = data["serviceType"] as? String ?? ""
+                    entity.costLKR = (data["costLKR"] as? Double) ?? 0
+                    entity.notes = data["notes"] as? String ?? ""
+                }
+            }
+            
+            // 2. Fuel Logs
+            if let fuelDocs = try? await firestoreService.fetchFuelLogs(fleetId: fleetId) {
+                for doc in fuelDocs {
+                    let data = doc.data()
+                    guard let idStr = data["id"] as? String,
+                          let logUUID = UUID(uuidString: idStr),
+                          let vehicleIdStr = data["vehicleId"] as? String,
+                          let vehicleUUID = UUID(uuidString: vehicleIdStr) else { continue }
+                    
+                    let request = NSFetchRequest<FuelLogEntity>(entityName: "FuelLogEntity")
+                    request.predicate = NSPredicate(format: "id == %@", logUUID as CVarArg)
+                    request.fetchLimit = 1
+                    
+                    let entity = (try? context.fetch(request).first) ?? FuelLogEntity(context: context)
+                    entity.id = logUUID
+                    entity.vehicleId = vehicleUUID
+                    if let ts = data["date"] as? Timestamp { entity.date = ts.dateValue() }
+                    entity.mileage = (data["mileage"] as? Double) ?? 0
+                    entity.litres = (data["litres"] as? Double) ?? 0
+                    entity.totalCostLKR = (data["totalCostLKR"] as? Double) ?? 0
+                    entity.costPerLitre = (data["costPerLitre"] as? Double) ?? 0
+                    entity.kmPerLitre = (data["kmPerLitre"] as? Double) ?? 0
+                }
+            }
+            
+            // 3. Trip Logs
+            if let tripDocs = try? await firestoreService.fetchTripLogs(fleetId: fleetId) {
+                for doc in tripDocs {
+                    let data = doc.data()
+                    guard let idStr = data["id"] as? String,
+                          let logUUID = UUID(uuidString: idStr),
+                          let vehicleIdStr = data["vehicleId"] as? String,
+                          let vehicleUUID = UUID(uuidString: vehicleIdStr) else { continue }
+                          
+                    let request = NSFetchRequest<TripLogEntity>(entityName: "TripLogEntity")
+                    request.predicate = NSPredicate(format: "id == %@", logUUID as CVarArg)
+                    request.fetchLimit = 1
+                    
+                    let entity = (try? context.fetch(request).first) ?? TripLogEntity(context: context)
+                    entity.id = logUUID
+                    entity.vehicleId = vehicleUUID
+                    entity.driverId = data["driverId"] as? String ?? ""
+                    entity.purpose = data["purpose"] as? String ?? ""
+                    entity.destination = data["destination"] as? String ?? ""
+                    entity.startMileage = (data["startMileage"] as? Double) ?? 0
+                    entity.endMileage = (data["endMileage"] as? Double) ?? 0
+                    entity.distanceKm = (data["distanceKm"] as? Double) ?? 0
+                    if let ts = data["date"] as? Timestamp { entity.date = ts.dateValue() }
+                }
+            }
+            
+            try context.save()
+            
+            // Notify UI that analytics data has been restored
+            NotificationCenter.default.post(name: Notification.Name("FleetAnalyticsDidSync"), object: nil)
+            
+        } catch {
+            print("Failed to background sync analytics data: \(error)")
         }
     }
 
@@ -132,46 +269,32 @@ class FleetViewModel: ObservableObject {
         let normalizedMake = make.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let vehicle = VehicleEntity(context: context)
-        vehicle.id = newId
-        vehicle.registration = normalizedRegistration
-        vehicle.make = normalizedMake
-        vehicle.model = normalizedModel
-        vehicle.year = year
-        vehicle.fuelType = fuelType
-        vehicle.currentMileage = currentMileage
-        vehicle.createdAt = createdAt
-        vehicle.assignedDriverId = assignedDriverName
-        vehicle.insuranceExpiry = insuranceExpiry
-        vehicle.licenceExpiry = licenceExpiry
+        var payload: [String: Any] = [
+            "id": newId.uuidString,
+            "registration": normalizedRegistration,
+            "make": normalizedMake,
+            "model": normalizedModel,
+            "year": Int(year),
+            "fuelType": fuelType,
+            "currentMileage": currentMileage,
+            "createdAt": Timestamp(date: createdAt),
+            "assignedDriverId": assignedDriverUserId ?? ""
+        ]
+
+        if let insuranceExpiry {
+            payload["insuranceExpiry"] = Timestamp(date: insuranceExpiry)
+        } else {
+            payload["insuranceExpiry"] = NSNull()
+        }
+
+        if let licenceExpiry {
+            payload["licenceExpiry"] = Timestamp(date: licenceExpiry)
+        } else {
+            payload["licenceExpiry"] = NSNull()
+        }
 
         do {
-            try context.save()
-
-            var payload: [String: Any] = [
-                "id": newId.uuidString,
-                "registration": normalizedRegistration,
-                "make": normalizedMake,
-                "model": normalizedModel,
-                "year": Int(year),
-                "fuelType": fuelType,
-                "currentMileage": currentMileage,
-                "createdAt": Timestamp(date: createdAt),
-                "assignedDriverId": assignedDriverName ?? ""
-            ]
-
-            if let insuranceExpiry {
-                payload["insuranceExpiry"] = Timestamp(date: insuranceExpiry)
-            } else {
-                payload["insuranceExpiry"] = NSNull()
-            }
-
-            if let licenceExpiry {
-                payload["licenceExpiry"] = Timestamp(date: licenceExpiry)
-            } else {
-                payload["licenceExpiry"] = NSNull()
-            }
-
+            // Attempt cloud save FIRST to ensure synchronization
             try await firestoreService.saveVehicle(payload, fleetId: fleetId, vehicleId: newId.uuidString)
 
             if let driverUserId = assignedDriverUserId, !driverUserId.isEmpty {
@@ -185,17 +308,31 @@ class FleetViewModel: ObservableObject {
                     vehicleId: newId.uuidString
                 )
             }
-            // Return the created vehicle id on success
+            
+            // Upsert: reuse existing entity if the listener already created one from the cloud write
+            let vehicle = existingVehicle(with: newId) ?? VehicleEntity(context: context)
+            vehicle.id = newId
+            vehicle.registration = normalizedRegistration
+            vehicle.make = normalizedMake
+            vehicle.model = normalizedModel
+            vehicle.year = year
+            vehicle.fuelType = fuelType
+            vehicle.currentMileage = currentMileage
+            vehicle.createdAt = createdAt
+            vehicle.assignedDriverId = assignedDriverName
+            vehicle.insuranceExpiry = insuranceExpiry
+            vehicle.licenceExpiry = licenceExpiry
+            
+            try context.save()
             fetchFromCoreData()
             isLoading = false
             return newId.uuidString
+            
         } catch {
             errorMessage = error.localizedDescription
+            isLoading = false
+            return nil
         }
-        fetchFromCoreData()
-
-        isLoading = false
-        return nil
     }
 
     // MARK: - Delete
@@ -233,29 +370,49 @@ class FleetViewModel: ObservableObject {
     /// - Parameter vehicle: Vehicle record to evaluate.
     /// - Returns: "Active", "Due Soon", or "Overdue".
     func vehicleStatus(_ vehicle: VehicleEntity) -> String {
+        let now = Date()
+        let thirtyDaysFromNow = Calendar.current.date(byAdding: .day, value: 30, to: now) ?? now
+        
+        var isExpired = false
+        var isExpiringSoon = false
+        
+        if let insExp = vehicle.insuranceExpiry {
+            if insExp < now { isExpired = true }
+            else if insExp <= thirtyDaysFromNow { isExpiringSoon = true }
+        }
+        
+        if let licExp = vehicle.licenceExpiry {
+            if licExp < now { isExpired = true }
+            else if licExp <= thirtyDaysFromNow { isExpiringSoon = true }
+        }
+        
+        if isExpired {
+            return "Overdue"
+        }
+
         let days = daysUntilService(vehicle)
 
         if days < 0 {
             return "Overdue"
         }
 
-        if days <= 30 {
+        if days <= 30 || isExpiringSoon {
             return "Due Soon"
         }
 
         return "Active"
     }
 
-    /// Returns days remaining until predicted service based on a simple mileage-to-days estimate.
+    /// Returns days remaining until predicted service based on the dynamic true daily km.
     /// - Parameter vehicle: Vehicle record to evaluate.
     /// - Returns: Negative value means the vehicle is overdue.
     func daysUntilService(_ vehicle: VehicleEntity) -> Int {
         let remainingMileage = predictedNextServiceMileage(vehicle) - vehicle.currentMileage
-        let assumedDailyMileage = 15.0
-        return Int((remainingMileage / assumedDailyMileage).rounded(.down))
+        let dailyKm = averageDailyKm(for: vehicle)
+        return Int((remainingMileage / max(1, dailyKm)).rounded(.down))
     }
 
-    /// Returns predicted next service mileage using average historical service interval.
+    /// Returns predicted next full service mileage using explicit Full Service tracking.
     /// - Parameter vehicle: Vehicle record to evaluate.
     /// - Returns: Predicted next service odometer value.
     func predictedNextServiceMileage(_ vehicle: VehicleEntity) -> Double {
@@ -265,36 +422,47 @@ class FleetViewModel: ObservableObject {
 
         let request = NSFetchRequest<ServiceRecordEntity>(entityName: "ServiceRecordEntity")
         request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
-        request.sortDescriptors = [NSSortDescriptor(key: "mileageAtService", ascending: true)]
+        request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
 
         do {
             let records = try context.fetch(request)
-            guard records.count >= 2 else {
-                return vehicle.currentMileage + 5000
-            }
-
-            var intervals: [Double] = []
-
-            for index in 1..<records.count {
-                let previous = records[index - 1].mileageAtService
-                let current = records[index].mileageAtService
-                let interval = current - previous
-
-                if interval > 0 {
-                    intervals.append(interval)
-                }
-            }
-
-            guard !intervals.isEmpty else {
-                return vehicle.currentMileage + 5000
-            }
-
-            let averageInterval = intervals.reduce(0, +) / Double(intervals.count)
-            let lastServiceMileage = records.last?.mileageAtService ?? vehicle.currentMileage
-            return lastServiceMileage + averageInterval
+            
+            // Find the last Full Service
+            let lastFullService = records.first { ($0.serviceType ?? "").localizedCaseInsensitiveContains("Full Service") }
+            
+            let lastMileage = lastFullService?.mileageAtService ?? (records.first?.mileageAtService ?? vehicle.currentMileage)
+            return lastMileage + 5000
         } catch {
             return vehicle.currentMileage + 5000
         }
+    }
+    
+    /// Calculates average daily kilometers based on vehicle history.
+    private func averageDailyKm(for vehicle: VehicleEntity) -> Double {
+        guard let vehicleId = vehicle.id else {
+            return 80
+        }
+        
+        let request = NSFetchRequest<ServiceRecordEntity>(entityName: "ServiceRecordEntity")
+        request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
+        request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
+        
+        do {
+            let records = try context.fetch(request)
+            guard let first = records.first, let last = records.last, first.id != last.id,
+                  let firstDate = first.date, let lastDate = last.date else {
+                return 80 // fallback
+            }
+            
+            let days = Calendar.current.dateComponents([.day], from: firstDate, to: lastDate).day ?? 0
+            let kmDiff = last.mileageAtService - first.mileageAtService
+            
+            if days > 0 && kmDiff > 0 {
+                return kmDiff / Double(days)
+            }
+        } catch {}
+        
+        return 80
     }
 
     // MARK: - Computed
@@ -313,6 +481,7 @@ class FleetViewModel: ObservableObject {
     var overdueCount: Int {
         vehicles.filter { vehicleStatus($0) == "Overdue" }.count
     }
+
 
     // MARK: - Cleanup
 

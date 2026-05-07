@@ -20,6 +20,7 @@ struct FuelLogView: View {
     @State private var showAddSheet = false
     @State private var errorText = ""
     @State private var fuelListener: ListenerRegistration?
+    @State private var fuelLogsBackfilled = false
 
     private let firestoreService = FirestoreService.shared
 
@@ -40,13 +41,19 @@ struct FuelLogView: View {
                     description: Text("Tap + to add the first fuel fill-up")
                 )
             } else {
-                ForEach(logs, id: \.id) { log in
-                    row(for: log)
-                }
-                .onDelete { offsets in
-                    Task {
-                        await deleteLogs(at: offsets)
+                heroSection
+                
+                Section {
+                    ForEach(logs, id: \.id) { log in
+                        row(for: log)
                     }
+                    .onDelete { offsets in
+                        Task {
+                            await deleteLogs(at: offsets)
+                        }
+                    }
+                } header: {
+                    Text("FUEL LOG — \(currentMonthName())")
                 }
             }
         }
@@ -77,36 +84,147 @@ struct FuelLogView: View {
             fuelListener?.remove()
             fuelListener = nil
         }
+        .onChange(of: authViewModel.fleetId) { _, newFleetId in
+            guard !newFleetId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            fuelLogsBackfilled = false
+            startFuelListener()
+        }
     }
 
-    private func row(for log: FuelLogEntity) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    // MARK: - Hero Section
+    
+    private var heroSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("\((vehicle.registration ?? "UNKNOWN").uppercased()) — FUEL EFFICIENCY")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.white.opacity(0.8))
+                .tracking(1.0)
+            
             HStack {
-                Text(mediumDate(log.date ?? Date()))
-                    .font(.subheadline.weight(.semibold))
-
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: "%.1f km/L", averageEfficiency))
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.white)
+                    Text("AVERAGE")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                
                 Spacer()
-
-                Text("LKR \(String(format: "%.0f", log.totalCostLKR))")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundColor(.navyPrimary)
-            }
-
-            Text(
-                "\(String(format: "%.1f", log.litres)) L  ·  " +
-                "\(String(format: "%.0f", log.mileage)) km  ·  " +
-                "LKR \(String(format: "%.2f", log.costPerLitre))/L"
-            )
-            .font(.caption)
-            .foregroundColor(.secondary)
-
-            if log.kmPerLitre > 0 {
-                Text("Efficiency: \(String(format: "%.2f", log.kmPerLitre)) km/L")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundColor(.statusActive)
+                
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(formattedCostThisMonth)
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.white)
+                    Text("THIS MONTH")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                }
             }
         }
-        .padding(.vertical, 4)
+        .padding(20)
+        .background(
+            LinearGradient(
+                colors: [.navyPrimary, .navyPrimary.opacity(0.85)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(16)
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var averageEfficiency: Double {
+        let validLogs = logs.filter { $0.kmPerLitre > 0 }
+        guard !validLogs.isEmpty else { return 0 }
+        let total = validLogs.reduce(0) { $0 + $1.kmPerLitre }
+        return total / Double(validLogs.count)
+    }
+
+    private var costThisMonth: Double {
+        let calendar = Calendar.current
+        let currentMonth = calendar.component(.month, from: Date())
+        let currentYear = calendar.component(.year, from: Date())
+        
+        let monthLogs = logs.filter {
+            guard let d = $0.date else { return false }
+            return calendar.component(.month, from: d) == currentMonth &&
+                   calendar.component(.year, from: d) == currentYear
+        }
+        return monthLogs.reduce(0) { $0 + $1.totalCostLKR }
+    }
+    
+    private var formattedCostThisMonth: String {
+        if costThisMonth >= 1000 {
+            return String(format: "LKR %.0fK", costThisMonth / 1000)
+        } else {
+            return String(format: "LKR %.0f", costThisMonth)
+        }
+    }
+    
+    private func currentMonthName() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: Date()).uppercased()
+    }
+
+    // MARK: - Row View
+    
+    private func row(for log: FuelLogEntity) -> some View {
+        HStack(spacing: 16) {
+            // Icon
+            ZStack {
+                Circle()
+                    .fill(Color(.systemGray6))
+                    .frame(width: 44, height: 44)
+                
+                Image(systemName: "fuelpump")
+                    .foregroundColor(.navyPrimary)
+                    .font(.system(size: 20))
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(mediumDate(log.date ?? Date()))
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    Text("LKR \(String(format: "%.0f", log.totalCostLKR))")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.navyPrimary)
+                }
+                
+                HStack(spacing: 6) {
+                    Text("\(String(format: "%.1f", log.litres))L · \(String(format: "%.0f", log.mileage)) km ·")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    if log.kmPerLitre > 0 {
+                        efficiencyPill(for: log.kmPerLitre)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 8)
+    }
+    
+    @ViewBuilder
+    private func efficiencyPill(for eff: Double) -> some View {
+        let isGood = eff >= averageEfficiency
+        let color = isGood ? Color.green : Color.orange
+        let icon = isGood ? "▲" : "▼"
+        
+        Text("\(String(format: "%.1f", eff)) km/L \(icon)")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.15))
+            .cornerRadius(4)
     }
 
     private func loadLogs() {
@@ -119,10 +237,13 @@ struct FuelLogView: View {
         request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
         request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
 
-        do {
-            logs = try context.fetch(request)
-        } catch {
-            logs = []
+        let all = (try? context.fetch(request)) ?? []
+
+        // Deduplicate by UUID — CoreData can hold duplicates if sync and backfill race
+        var seen = Set<UUID>()
+        logs = all.filter { log in
+            guard let id = log.id else { return false }
+            return seen.insert(id).inserted
         }
     }
 
@@ -194,6 +315,35 @@ struct FuelLogView: View {
         let request = NSFetchRequest<FuelLogEntity>(entityName: "FuelLogEntity")
         request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
         let existing = (try? context.fetch(request)) ?? []
+
+        // On first sync: upload any local-only records to Firestore before they get deleted
+        if !fuelLogsBackfilled {
+            fuelLogsBackfilled = true
+            let fleetId = authViewModel.fleetId
+            let localOnly = existing.filter { item in
+                guard let id = item.id else { return false }
+                return !syncedIDs.contains(id)
+            }
+            if !localOnly.isEmpty {
+                Task {
+                    for item in localOnly {
+                        guard let logId = item.id?.uuidString else { continue }
+                        let payload: [String: Any] = [
+                            "id": logId,
+                            "vehicleId": vehicleIdString,
+                            "date": Timestamp(date: item.date ?? Date()),
+                            "mileage": item.mileage,
+                            "litres": item.litres,
+                            "totalCostLKR": item.totalCostLKR,
+                            "costPerLitre": item.costPerLitre,
+                            "kmPerLitre": item.kmPerLitre
+                        ]
+                        try? await firestoreService.saveFuelLog(payload, fleetId: fleetId, logId: logId)
+                    }
+                }
+                return // listener will fire again once uploads complete
+            }
+        }
 
         for item in existing {
             guard let id = item.id else {
@@ -291,8 +441,23 @@ private struct AddFuelLogSheet: View {
     @State private var totalCost = ""
     @State private var errorText = ""
     @State private var isSaving = false
+    @State private var previousMileage: Double = 0
 
     private let firestoreService = FirestoreService.shared
+
+    @State private var manualEfficiency = ""
+
+    private var enteredMileage: Double? {
+        Double(mileage.replacingOccurrences(of: ",", with: ""))
+    }
+
+    private func updateEstimatedEfficiency() {
+        guard previousMileage > 0,
+              let m = enteredMileage, m > previousMileage,
+              let l = Double(litres.replacingOccurrences(of: ",", with: "")), l > 0
+        else { return }
+        manualEfficiency = String(format: "%.2f", (m - previousMileage) / l)
+    }
 
     var body: some View {
         NavigationStack {
@@ -300,14 +465,38 @@ private struct AddFuelLogSheet: View {
                 Section("FILL-UP DETAILS") {
                     DatePicker("Date", selection: $date, displayedComponents: .date)
 
-                    TextField("Mileage (km)", text: $mileage)
-                        .keyboardType(.decimalPad)
+                    VStack(alignment: .leading, spacing: 4) {
+                        TextField("Mileage (km)", text: $mileage)
+                            .keyboardType(.decimalPad)
+
+                        if previousMileage > 0 {
+                            Text("Last logged: \(String(format: "%.0f", previousMileage)) km")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let m = enteredMileage, m > 0, m < previousMileage {
+                            Text("Must be ≥ last logged \(String(format: "%.0f", previousMileage)) km")
+                                .font(.caption)
+                                .foregroundStyle(Color.statusOverdue)
+                        }
+                    }
 
                     TextField("Litres", text: $litres)
                         .keyboardType(.decimalPad)
 
                     TextField("Total Cost (LKR)", text: $totalCost)
                         .keyboardType(.decimalPad)
+                }
+                
+                Section("EFFICIENCY") {
+                    HStack {
+                        Text("Efficiency (km/L)")
+                        Spacer()
+                        TextField("0.0", text: $manualEfficiency)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
                 }
 
                 if !errorText.isEmpty {
@@ -322,22 +511,35 @@ private struct AddFuelLogSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
+                    Button("Cancel") { dismiss() }
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        Task {
-                            await save()
-                        }
+                        Task { await save() }
                     }
                     .fontWeight(.bold)
                     .disabled(isSaving)
                 }
             }
             .disabled(isSaving)
+            .onAppear { prefillMileage() }
+            .onChange(of: mileage) { _, _ in updateEstimatedEfficiency() }
+            .onChange(of: litres) { _, _ in updateEstimatedEfficiency() }
+        }
+    }
+
+    private func prefillMileage() {
+        guard let vehicleId = vehicle.id else { return }
+        
+        let lastFuel = latestFuelLogMileage(for: vehicleId)
+        previousMileage = lastFuel
+        
+        let current = vehicle.currentMileage
+        if current > 0 {
+            mileage = String(format: "%.0f", current)
+        } else if lastFuel > 0 {
+            mileage = String(format: "%.0f", lastFuel)
         }
     }
 
@@ -349,6 +551,12 @@ private struct AddFuelLogSheet: View {
             return
         }
 
+        let fleetId = authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fleetId.isEmpty else {
+            errorText = "Fleet ID is missing — cannot save to cloud. Please sign out and back in."
+            return
+        }
+
         guard let mileageValue = Double(mileage.replacingOccurrences(of: ",", with: "")),
               let litresValue = Double(litres.replacingOccurrences(of: ",", with: "")),
               let totalValue = Double(totalCost.replacingOccurrences(of: ",", with: "")),
@@ -357,22 +565,61 @@ private struct AddFuelLogSheet: View {
             return
         }
 
-        let previousMileage = latestFuelLogMileage(for: vehicleId)
+        if previousMileage > 0 && mileageValue < previousMileage {
+            errorText = "Odometer reading cannot be less than the last logged \(String(format: "%.0f", previousMileage)) km. Please check your odometer."
+            isSaving = false
+            return
+        }
+
         let distance = max(0, mileageValue - previousMileage)
-        let efficiency = distance > 0 ? distance / litresValue : 0
+        var efficiency = distance > 0 ? distance / litresValue : 0
+        
+        if let manualEff = Double(manualEfficiency.replacingOccurrences(of: ",", with: "")), manualEff > 0 {
+            efficiency = manualEff
+        }
+        
         let logId = UUID()
 
         isSaving = true
 
-        // Persist locally first to avoid duplicates when the realtime listener triggers
-        let log = FuelLogEntity(context: context)
+        let costPerLitre = totalValue / litresValue
+
+        // Sync to Firestore first
+        do {
+            let payload: [String: Any] = [
+                "id": logId.uuidString,
+                "vehicleId": vehicleId.uuidString,
+                "date": Timestamp(date: date),
+                "mileage": mileageValue,
+                "litres": litresValue,
+                "totalCostLKR": totalValue,
+                "costPerLitre": costPerLitre,
+                "kmPerLitre": efficiency
+            ]
+
+            try await firestoreService.saveFuelLog(
+                payload,
+                fleetId: fleetId,
+                logId: logId.uuidString
+            )
+        } catch {
+            errorText = "Firebase sync failed: \(error.localizedDescription). Please try again."
+            isSaving = false
+            return
+        }
+
+        // Save to CoreData — upsert to guard against listener race creating a duplicate
+        let upsertReq = NSFetchRequest<FuelLogEntity>(entityName: "FuelLogEntity")
+        upsertReq.fetchLimit = 1
+        upsertReq.predicate = NSPredicate(format: "id == %@", logId as CVarArg)
+        let log = (try? context.fetch(upsertReq).first) ?? FuelLogEntity(context: context)
         log.id = logId
         log.vehicleId = vehicleId
         log.date = date
         log.mileage = mileageValue
         log.litres = litresValue
         log.totalCostLKR = totalValue
-        log.costPerLitre = totalValue / litresValue
+        log.costPerLitre = costPerLitre
         log.kmPerLitre = efficiency
 
         vehicle.currentMileage = max(vehicle.currentMileage, mileageValue)
@@ -385,34 +632,8 @@ private struct AddFuelLogSheet: View {
             return
         }
 
-        // Attempt cloud sync but keep local record if it fails
-        do {
-            let payload: [String: Any] = [
-                "id": logId.uuidString,
-                "vehicleId": vehicleId.uuidString,
-                "date": date,
-                "mileage": mileageValue,
-                "litres": litresValue,
-                "totalCostLKR": totalValue,
-                "costPerLitre": totalValue / litresValue,
-                "kmPerLitre": efficiency
-            ]
-
-            try await firestoreService.saveFuelLog(
-                payload,
-                fleetId: authViewModel.fleetId,
-                logId: logId.uuidString
-            )
-        } catch {
-            errorText = "Cloud sync failed for fuel log; saved locally."
-            isSaving = false
-            onSaved()
-            dismiss()
-            return
-        }
-
-        onSaved()
         isSaving = false
+        onSaved()
         dismiss()
     }
 

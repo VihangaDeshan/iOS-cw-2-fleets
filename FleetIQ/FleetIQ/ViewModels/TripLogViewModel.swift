@@ -21,6 +21,8 @@ final class TripLogViewModel: ObservableObject {
     private let context = PersistenceController.shared.viewContext
     private let firestoreService = FirestoreService.shared
     private var tripListener: ListenerRegistration?
+    private var currentFleetId: String = ""
+    private var hasBackfilledTrips = false
 
     deinit {
         tripListener?.remove()
@@ -36,6 +38,9 @@ final class TripLogViewModel: ObservableObject {
         guard !normalizedFleetId.isEmpty else {
             return
         }
+
+        currentFleetId = normalizedFleetId
+        hasBackfilledTrips = false
 
         tripListener = firestoreService.listenToTripLogs(fleetId: normalizedFleetId) { [weak self] docs in
             guard let self else {
@@ -120,30 +125,7 @@ final class TripLogViewModel: ObservableObject {
         isSaving = true
         defer { isSaving = false }
 
-        // Persist locally first so the realtime listener upsert does not create a duplicate
-        let trip = TripLogEntity(context: context)
-        trip.id = tripId
-        trip.vehicleId = vehicleId
-        trip.driverId = normalizedDriverId
-        trip.purpose = normalizedPurpose
-        trip.destination = normalizedDestination
-        trip.startMileage = startMileage
-        trip.endMileage = endMileage
-        trip.distanceKm = distanceKm
-        trip.date = date
-
-        if let vehicle {
-            vehicle.currentMileage = max(vehicle.currentMileage, endMileage)
-        }
-
-        do {
-            try context.save()
-        } catch {
-            errorMessage = "Could not save trip log locally."
-            return false
-        }
-
-        // Attempt cloud sync but keep local record if it fails. Using same id prevents duplicates.
+        // Attempt cloud sync first
         do {
             let payload: [String: Any] = [
                 "id": tripId.uuidString,
@@ -163,10 +145,47 @@ final class TripLogViewModel: ObservableObject {
                 logId: tripId.uuidString
             )
         } catch {
-            errorMessage = "Cloud sync failed for trip log; saved locally."
-            // still return true because local save succeeded
-            loadTrips(for: vehicleId)
-            return true
+            errorMessage = "Cloud sync failed for trip log."
+            return false
+        }
+
+        let upsertReq = NSFetchRequest<TripLogEntity>(entityName: "TripLogEntity")
+        upsertReq.fetchLimit = 1
+        upsertReq.predicate = NSPredicate(format: "id == %@", tripId as CVarArg)
+        
+        let trip = (try? context.fetch(upsertReq).first) ?? TripLogEntity(context: context)
+        trip.id = tripId
+        trip.vehicleId = vehicleId
+        trip.driverId = normalizedDriverId
+        trip.purpose = normalizedPurpose
+        trip.destination = normalizedDestination
+        trip.startMileage = startMileage
+        trip.endMileage = endMileage
+        trip.distanceKm = distanceKm
+        trip.date = date
+
+        if let vehicle {
+            vehicle.currentMileage = max(vehicle.currentMileage, endMileage)
+            
+            // Sync updated mileage to Firestore
+            do {
+                try await firestoreService.updateVehicle(
+                    fleetId: normalizedFleetId,
+                    vehicleId: vehicleId.uuidString,
+                    data: ["currentMileage": vehicle.currentMileage]
+                )
+            } catch {
+                #if DEBUG
+                print("Failed to sync updated mileage to Firestore: \(error.localizedDescription)")
+                #endif
+            }
+        }
+
+        do {
+            try context.save()
+        } catch {
+            errorMessage = "Could not save trip log locally."
+            return false
         }
 
         loadTrips(for: vehicleId)
@@ -234,6 +253,36 @@ final class TripLogViewModel: ObservableObject {
         let request = NSFetchRequest<TripLogEntity>(entityName: "TripLogEntity")
         request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
         let existing = (try? context.fetch(request)) ?? []
+
+        // On first sync: upload any local-only records to Firestore before they get deleted
+        if !hasBackfilledTrips && !currentFleetId.isEmpty {
+            hasBackfilledTrips = true
+            let fleetId = currentFleetId
+            let localOnly = existing.filter { item in
+                guard let id = item.id else { return false }
+                return !syncedIDs.contains(id)
+            }
+            if !localOnly.isEmpty {
+                Task {
+                    for item in localOnly {
+                        guard let logId = item.id?.uuidString else { continue }
+                        let payload: [String: Any] = [
+                            "id": logId,
+                            "vehicleId": vehicleId.uuidString,
+                            "driverId": item.driverId ?? "",
+                            "purpose": item.purpose ?? "",
+                            "destination": item.destination ?? "",
+                            "startMileage": item.startMileage,
+                            "endMileage": item.endMileage,
+                            "distanceKm": item.distanceKm,
+                            "date": Timestamp(date: item.date ?? Date())
+                        ]
+                        try? await firestoreService.saveTripLog(payload, fleetId: fleetId, logId: logId)
+                    }
+                }
+                return // listener will fire again once uploads complete
+            }
+        }
 
         for item in existing {
             guard let existingId = item.id else {

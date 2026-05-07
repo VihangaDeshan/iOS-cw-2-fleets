@@ -115,6 +115,11 @@ struct ServiceHistoryView: View {
         .onAppear {
             if let id = vehicle.id {
                 viewModel.loadRecords(for: id)
+                Task {
+                    await viewModel.syncRecords(
+                        vehicleId: id,
+                        fleetId: authViewModel.fleetId)
+                }
             }
         }
     }
@@ -123,23 +128,38 @@ struct ServiceHistoryView: View {
 
     /// Displays smart next-service prediction based on historical interval.
     private var schedulerBanner: some View {
-        let nextKm = (viewModel.records.first?.mileageAtService ?? 0) + viewModel.averageServiceIntervalKm()
+        let isOverdue = viewModel.isFullServiceOverdue
+        let nextKm = viewModel.nextFullServiceMileage
+        let nextDate = viewModel.nextFullServiceDate
 
-        return HStack(spacing: 8) {
-            Image(systemName: "info.circle.fill")
-                .foregroundColor(.navyPrimary)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: isOverdue ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
+                    .foregroundColor(isOverdue ? .statusOverdue : .statusActive)
 
-            Text("Next service predicted at " + String(format: "%.0f km", nextKm))
-                .font(.subheadline)
-                .foregroundColor(Color(hex: "1A3C6E"))
+                Text(isOverdue ? "Full Service Overdue (> 3 months)" : "Full Service Up To Date")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundColor(isOverdue ? .statusOverdue : .statusActive)
+                
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Predicted Next Full Service:")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text("\(String(format: "%.0f km", nextKm)) (approx. \(mediumDate(nextDate)))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(Color(hex: "1A3C6E"))
+            }
+            .padding(.leading, 30)
         }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(hex: "E8F0FB"))
-        .cornerRadius(10)
+        .padding(14)
+        .background(isOverdue ? Color.statusOverdue.opacity(0.1) : Color(hex: "E8F0FB"))
+        .cornerRadius(12)
         .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .accessibilityLabel("Next service predicted at " + String(format: "%.0f kilometres", nextKm))
+        .padding(.top, 12)
+        .accessibilityLabel(isOverdue ? "Warning: Full service overdue. Next predicted at \(String(format: "%.0f", nextKm)) kilometers." : "Next service predicted at \(String(format: "%.0f", nextKm)) kilometers.")
     }
 
     // MARK: - Filter Strip
@@ -231,9 +251,22 @@ struct ServiceHistoryView: View {
 
             Spacer()
 
-            Text("LKR \(String(format: "%.0f", record.costLKR))")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundColor(.navyPrimary)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text("LKR \(String(format: "%.0f", record.costLKR))")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.navyPrimary)
+                
+                Button(role: .destructive) {
+                    Task {
+                        await viewModel.deleteRecord(record, fleetId: authViewModel.fleetId)
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundColor(.red)
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.borderless)
+            }
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)

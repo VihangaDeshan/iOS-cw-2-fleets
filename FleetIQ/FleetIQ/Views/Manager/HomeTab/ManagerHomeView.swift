@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import Combine
 
 // MARK: - Manager Home View
 struct ManagerHomeView: View {
@@ -15,6 +16,7 @@ struct ManagerHomeView: View {
     @EnvironmentObject var fleetViewModel: FleetViewModel
 
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var showAddVehicle = false
     @State private var showManageDrivers = false
@@ -24,6 +26,10 @@ struct ManagerHomeView: View {
     @State private var showUserProfile = false
     @State private var showNotifications = false
     @State private var selectedAlertVehicle: VehicleEntity? = nil
+    @State private var hasShownWelcome = false
+    @State private var showExpiredDocsAlert = false
+    @State private var expiredDocsSummary: [String] = []
+    @State private var hasCheckedExpiredDocs = false
 
     @State private var heroPage = 0
     @State private var monthlySpend: Double = 0
@@ -147,6 +153,15 @@ struct ManagerHomeView: View {
             }
             .onAppear {
                 loadHomeMetrics()
+                if !hasShownWelcome {
+                    hasShownWelcome = true
+                    NotificationService.shared.sendManagerWelcome(name: authViewModel.currentUserName)
+                }
+            }
+            .alert("Expired Documents ⚠️", isPresented: $showExpiredDocsAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("The following documents require immediate renewal:\n\n\(expiredDocsSummary.joined(separator: "\n"))")
             }
             .onChange(of: fleetViewModel.vehicles.count) { _, _ in
                 loadHomeMetrics()
@@ -155,6 +170,18 @@ struct ManagerHomeView: View {
                 loadHomeMetrics()
             }
             .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)) { _ in
+                loadHomeMetrics()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    loadHomeMetrics()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .appSessionDidActivate)) { _ in
+                loadHomeMetrics()
+                NotificationService.shared.sendManagerWelcome(name: authViewModel.currentUserName)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FleetAnalyticsDidSync"))) { _ in
                 loadHomeMetrics()
             }
         }
@@ -224,6 +251,11 @@ struct ManagerHomeView: View {
         }
         .frame(height: 210)
         .tabViewStyle(.page(indexDisplayMode: .automatic))
+        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
+            withAnimation {
+                heroPage = (heroPage + 1) % 3
+            }
+        }
     }
 
     // MARK: - Fleet Hero Card
@@ -258,7 +290,7 @@ struct ManagerHomeView: View {
             statusProgressBar
                 .padding(.top, 12)
 
-            HStack(spacing: 16) {
+            HStack(spacing: 8) {
                 legendItem(
                     colour: .statusActive,
                     label: "Active",
@@ -484,22 +516,42 @@ struct ManagerHomeView: View {
             }
             .padding(.top, 14)
 
-            let overdue = fleetViewModel.vehicles.filter {
-                fleetViewModel.vehicleStatus($0) == "Overdue"
-            }
+            // Deduplicate by registration to handle CoreData duplicates
+            let overdue: [VehicleEntity] = {
+                var seen = Set<String>()
+                return fleetViewModel.vehicles.filter { v in
+                    fleetViewModel.vehicleStatus(v) == "Overdue"
+                        && seen.insert(v.registration ?? "").inserted
+                }
+            }()
 
-            let expiring = fleetViewModel.vehicles.filter {
-                isLicenceExpiringSoon($0)
-            }
-
+            // Fault-only unread notifications (expiry items shown separately below)
             let priorityNotifications = Array(
                 notifications
-                    .filter { !$0.isRead }
+                    .filter {
+                        !$0.isRead
+                            && !$0.id.hasPrefix("licence-")
+                            && !$0.id.hasPrefix("insurance-")
+                            && !$0.id.hasPrefix("doc-")
+                    }
                     .sorted { $0.date > $1.date }
-                    .prefix(2)
             )
 
-            if overdue.isEmpty && expiring.isEmpty && priorityNotifications.isEmpty {
+            // All expiry alerts (licence + insurance + docs), deduplicated by title
+            // so duplicate CoreData records for the same vehicle collapse to one row.
+            let expiryAlerts: [ManagerNotificationItem] = {
+                var seenTitles = Set<String>()
+                return notifications
+                    .filter {
+                        $0.id.hasPrefix("licence-")
+                            || $0.id.hasPrefix("insurance-")
+                            || $0.id.hasPrefix("doc-")
+                    }
+                    .sorted { $0.date > $1.date }
+                    .filter { seenTitles.insert($0.title).inserted }
+            }()
+
+            if overdue.isEmpty && priorityNotifications.isEmpty && expiryAlerts.isEmpty {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.statusActive)
@@ -514,56 +566,95 @@ struct ManagerHomeView: View {
                 .cornerRadius(12)
                 .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
             } else {
-                // Fault / notification alerts → tap to open Fault Reports
-                ForEach(priorityNotifications) { item in
-                    Button {
-                        showFaults = true
-                    } label: {
-                        alertRow(
-                            icon: item.level.icon,
-                            iconBg: item.level.background,
-                            iconColour: item.level.color,
-                            title: item.title,
-                            subtitle: item.subtitle
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: 8) {
+                        // Fault / notification alerts → tap to open Fault Reports
+                        ForEach(priorityNotifications) { item in
+                            Button {
+                                showFaults = true
+                            } label: {
+                                alertRow(
+                                    icon: item.level.icon,
+                                    iconBg: item.level.background,
+                                    iconColour: item.level.color,
+                                    title: item.title,
+                                    subtitle: item.subtitle
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
 
-                // Overdue service alerts → tap to open vehicle detail
-                ForEach(overdue.prefix(2), id: \.id) { vehicle in
-                    NavigationLink(destination: VehicleDetailView(vehicle: vehicle)
-                                    .environmentObject(authViewModel)
-                                    .environmentObject(fleetViewModel)) {
-                        alertRow(
-                            icon: "exclamationmark.triangle.fill",
-                            iconBg: Color.chipRedBg,
-                            iconColour: Color.chipRedText,
-                            title: "Service Overdue - \(vehicle.registration ?? "")",
-                            subtitle: "\(abs(fleetViewModel.daysUntilService(vehicle))) days past due"
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
+                        // Overdue service alerts → tap to open vehicle detail
+                        ForEach(overdue, id: \.id) { vehicle in
+                            NavigationLink(destination: VehicleDetailView(vehicle: vehicle)
+                                            .environmentObject(authViewModel)
+                                            .environmentObject(fleetViewModel)) {
+                                alertRow(
+                                    icon: "exclamationmark.triangle.fill",
+                                    iconBg: Color.chipRedBg,
+                                    iconColour: Color.chipRedText,
+                                    title: "Service Overdue - \(vehicle.registration ?? "")",
+                                    subtitle: "\(abs(fleetViewModel.daysUntilService(vehicle))) days past due"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
 
-                // Expiring licence alerts → tap to open vehicle detail
-                ForEach(expiring.prefix(2), id: \.id) { vehicle in
-                    NavigationLink(destination: VehicleDetailView(vehicle: vehicle)
-                                    .environmentObject(authViewModel)
-                                    .environmentObject(fleetViewModel)) {
-                        alertRow(
-                            icon: "doc.fill",
-                            iconBg: Color.chipOrangeBg,
-                            iconColour: Color.chipOrangeText,
-                            title: "Licence Expiring - \(vehicle.registration ?? "")",
-                            subtitle: licenceDaysText(vehicle)
-                        )
+                        // All expiry alerts (licence, insurance, emission) — deduplicated
+                        ForEach(expiryAlerts) { item in
+                            expiryAlertRow(item)
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 2)
                 }
+                .frame(maxHeight: 210)
             }
         }
-        
+    }
+
+    /// Renders one expiry alert row, navigating to vehicle detail when possible.
+    @ViewBuilder
+    private func expiryAlertRow(_ item: ManagerNotificationItem) -> some View {
+        let vehicleIdStr: String? = {
+            if item.id.hasPrefix("licence-") || item.id.hasPrefix("insurance-") || item.id.hasPrefix("doc-") {
+                let withoutPrefix: String
+                if item.id.hasPrefix("licence-") { withoutPrefix = String(item.id.dropFirst("licence-".count)) }
+                else if item.id.hasPrefix("insurance-") { withoutPrefix = String(item.id.dropFirst("insurance-".count)) }
+                else { withoutPrefix = String(item.id.dropFirst("doc-".count)) }
+                
+                if let lastDashIndex = withoutPrefix.lastIndex(of: "-") {
+                    return String(withoutPrefix[..<lastDashIndex])
+                }
+                return withoutPrefix
+            }
+            return nil
+        }()
+        let vehicle = vehicleIdStr.flatMap { uid in
+            fleetViewModel.vehicles.first { $0.id?.uuidString == uid }
+        }
+        if let vehicle {
+            NavigationLink(destination: VehicleDetailView(vehicle: vehicle)
+                            .environmentObject(authViewModel)
+                            .environmentObject(fleetViewModel)) {
+                alertRow(
+                    icon: "doc.fill",
+                    iconBg: item.level.background,
+                    iconColour: item.level.color,
+                    title: item.title,
+                    subtitle: item.subtitle
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            alertRow(
+                icon: "doc.fill",
+                iconBg: item.level.background,
+                iconColour: item.level.color,
+                title: item.title,
+                subtitle: item.subtitle
+            )
+        }
     }
 
     /// Builds a single urgent alert row.
@@ -710,6 +801,62 @@ struct ManagerHomeView: View {
         .accessibilityHint(subtitle)
     }
 
+    // MARK: - Today's Activity Helper struct
+    struct UnifiedActivityItem: Identifiable {
+        let id: String
+        let icon: String
+        let iconColor: Color
+        let title: String
+        let detail: String
+        let time: Date
+    }
+
+    private var combinedTodayActivity: [UnifiedActivityItem] {
+        var items: [UnifiedActivityItem] = []
+        
+        for fault in todayFaultReports {
+            items.append(UnifiedActivityItem(
+                id: fault.id?.uuidString ?? UUID().uuidString,
+                icon: "exclamationmark.triangle.fill",
+                iconColor: .statusOverdue,
+                title: "Fault reported",
+                detail: fault.descriptionText ?? "Fault submitted",
+                time: fault.createdAt ?? Date()
+            ))
+        }
+        for record in todayServiceRecords {
+            items.append(UnifiedActivityItem(
+                id: record.id?.uuidString ?? UUID().uuidString,
+                icon: "wrench.and.screwdriver.fill",
+                iconColor: .navyPrimary,
+                title: record.serviceType ?? "Service logged",
+                detail: record.garageName ?? "Service record saved",
+                time: record.date ?? Date()
+            ))
+        }
+        for log in todayFuelLogs {
+            items.append(UnifiedActivityItem(
+                id: log.id?.uuidString ?? UUID().uuidString,
+                icon: "fuelpump.fill",
+                iconColor: .statusDueSoon,
+                title: "Fuel fill-up logged",
+                detail: String(format: "%.1f L · LKR %.0f", log.litres, log.totalCostLKR),
+                time: log.date ?? Date()
+            ))
+        }
+        for trip in todayTripLogs {
+            items.append(UnifiedActivityItem(
+                id: trip.id?.uuidString ?? UUID().uuidString,
+                icon: "road.lanes",
+                iconColor: .driverGreen,
+                title: trip.purpose?.isEmpty == false ? trip.purpose! : "Trip logged",
+                detail: String(format: "%.1f km · %@", trip.distanceKm, trip.destination ?? "-"),
+                time: trip.date ?? Date()
+            ))
+        }
+        return items.sorted { $0.time > $1.time }
+    }
+
     // MARK: - Today's Activity
     var todayActivitySection: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -727,10 +874,8 @@ struct ManagerHomeView: View {
             }
             .padding(.top, 14)
 
-            let totalToday = todayServiceRecords.count
-                + todayFuelLogs.count
-                + todayFaultReports.count
-                + todayTripLogs.count
+            let unifiedActivities = combinedTodayActivity
+            let totalToday = unifiedActivities.count
 
             if totalToday == 0 {
                 HStack(spacing: 8) {
@@ -747,48 +892,19 @@ struct ManagerHomeView: View {
                 .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(todayFaultReports.prefix(2)), id: \.id) { fault in
+                    let top5 = Array(unifiedActivities.prefix(5))
+                    ForEach(top5.indices, id: \.self) { index in
+                        let item = top5[index]
                         activityRow(
-                            icon: "exclamationmark.triangle.fill",
-                            iconColor: .statusOverdue,
-                            title: "Fault reported",
-                            detail: fault.descriptionText ?? "Fault submitted",
-                            time: fault.createdAt
+                            icon: item.icon,
+                            iconColor: item.iconColor,
+                            title: item.title,
+                            detail: item.detail,
+                            time: item.time
                         )
-                        Divider().padding(.leading, 46)
-                    }
-                    ForEach(Array(todayServiceRecords.prefix(2)), id: \.id) { record in
-                        activityRow(
-                            icon: "wrench.and.screwdriver.fill",
-                            iconColor: .navyPrimary,
-                            title: record.serviceType ?? "Service logged",
-                            detail: record.garageName ?? "Service record saved",
-                            time: record.date
-                        )
-                        Divider().padding(.leading, 46)
-                    }
-                    ForEach(Array(todayFuelLogs.prefix(2)), id: \.id) { log in
-                        activityRow(
-                            icon: "fuelpump.fill",
-                            iconColor: .statusDueSoon,
-                            title: "Fuel fill-up logged",
-                            detail: String(format: "%.1f L · LKR %.0f",
-                                          log.litres, log.totalCostLKR),
-                            time: log.date
-                        )
-                        Divider().padding(.leading, 46)
-                    }
-                    ForEach(Array(todayTripLogs.prefix(2)), id: \.id) { trip in
-                        activityRow(
-                            icon: "road.lanes",
-                            iconColor: .driverGreen,
-                            title: trip.purpose?.isEmpty == false
-                                ? trip.purpose! : "Trip logged",
-                            detail: String(format: "%.1f km · %@",
-                                          trip.distanceKm,
-                                          trip.destination ?? "-"),
-                            time: trip.date
-                        )
+                        if index < top5.count - 1 {
+                            Divider().padding(.leading, 46)
+                        }
                     }
                 }
                 .background(Color.white)
@@ -913,12 +1029,125 @@ struct ManagerHomeView: View {
 
         expiringInsuranceCount = fleetViewModel.vehicles.filter { vehicle in
             guard let expiry = vehicle.insuranceExpiry else { return false }
-            let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+            let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: expiry)).day ?? 0
             return days >= 0 && days <= 30
         }.count
 
+        // Reschedule or fire expiry push notifications for all vehicle documents.
+        // Deduplicate by registration first so CoreData duplicate records for the
+        // same physical vehicle don't fire two separate push notifications.
+        var seenInsurance = Set<String>()
+        var seenLicence = Set<String>()
+        for vehicle in fleetViewModel.vehicles {
+            guard let vehicleId = vehicle.id else { continue }
+            let reg = vehicle.registration ?? "Vehicle"
+            
+            if let insuranceExpiry = vehicle.insuranceExpiry, !seenInsurance.contains(reg) {
+                let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: insuranceExpiry)).day ?? Int.min
+                if days <= 30 {
+                    seenInsurance.insert(reg)
+                }
+                NotificationService.shared.rescheduleExpiryIfNeeded(
+                    vehicleRegistration: reg,
+                    documentType: "Insurance",
+                    expiryDate: insuranceExpiry,
+                    vehicleId: vehicleId)
+            }
+            if let licenceExpiry = vehicle.licenceExpiry, !seenLicence.contains(reg) {
+                let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: licenceExpiry)).day ?? Int.min
+                if days <= 30 {
+                    seenLicence.insert(reg)
+                }
+                NotificationService.shared.rescheduleExpiryIfNeeded(
+                    vehicleRegistration: reg,
+                    documentType: "Revenue Licence",
+                    expiryDate: licenceExpiry,
+                    vehicleId: vehicleId)
+            }
+        }
+
+        // Also scan DocumentEntity so all document types (emission, insurance, licence)
+        // fire push notifications on app open even if VehicleEntity expiry fields are nil.
+        var seenDocs = Set<String>()
+        let allDocReq = DocumentEntity.fetchRequest()
+        if let allDocs = try? context.fetch(allDocReq) {
+            for doc in allDocs {
+                guard let type = doc.type,
+                      let expiry = doc.expiryDate,
+                      let vehicleId = doc.vehicleId,
+                      let matchedVehicle = fleetViewModel.vehicles.first(where: { $0.id == vehicleId })
+                else { continue }
+                
+                let reg = matchedVehicle.registration ?? "Vehicle"
+                let key = "\(reg)-\(type.capitalized)"
+                
+                if !seenDocs.contains(key) {
+                    let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: expiry)).day ?? Int.min
+                    if days <= 30 {
+                        seenDocs.insert(key)
+                    }
+                    NotificationService.shared.rescheduleExpiryIfNeeded(
+                        vehicleRegistration: reg,
+                        documentType: type.capitalized,
+                        expiryDate: expiry,
+                        vehicleId: vehicleId)
+                }
+            }
+        }
+
         rebuildNotifications(from: activeFaults)
-        loadTodayActivity()   // Bug 2: Load today's activity at end
+        loadTodayActivity()
+        checkAndAlertExpiredDocuments()
+    }
+
+    /// Checks vehicles' insurance and licence expiry dates and shows an in-app alert
+    /// once per session when any have already expired.
+    private func checkAndAlertExpiredDocuments() {
+        guard !hasCheckedExpiredDocs, !fleetViewModel.vehicles.isEmpty else { return }
+        hasCheckedExpiredDocs = true
+
+        var expired: [String] = []
+        let today = Calendar.current.startOfDay(for: Date())
+
+        for vehicle in fleetViewModel.vehicles {
+            let reg = vehicle.registration ?? "Vehicle"
+            if let expiry = vehicle.insuranceExpiry,
+               let days = Calendar.current.dateComponents([.day], from: today, to: Calendar.current.startOfDay(for: expiry)).day,
+               days < 0 {
+                expired.append("\(reg) — Insurance (expired \(abs(days))d ago)")
+            }
+            if let expiry = vehicle.licenceExpiry,
+               let days = Calendar.current.dateComponents([.day], from: today, to: Calendar.current.startOfDay(for: expiry)).day,
+               days < 0 {
+                expired.append("\(reg) — Revenue Licence (expired \(abs(days))d ago)")
+            }
+        }
+
+        // Also check DocumentEntity records in CoreData for emission and any other types.
+        let docRequest = DocumentEntity.fetchRequest()
+        if let docs = try? context.fetch(docRequest) {
+            for doc in docs {
+                guard let type = doc.type,
+                      let expiry = doc.expiryDate,
+                      let vehicleId = doc.vehicleId,
+                      let vehicle = fleetViewModel.vehicles.first(where: { $0.id == vehicleId }),
+                      let days = Calendar.current.dateComponents(
+                          [.day], from: today,
+                          to: Calendar.current.startOfDay(for: expiry)).day,
+                      days < 0 else { continue }
+
+                // Only add emission here (insurance/licence already covered from VehicleEntity above).
+                let typeLC = type.lowercased()
+                guard typeLC != "insurance" && typeLC != "licence" else { continue }
+                let reg = vehicle.registration ?? "Vehicle"
+                expired.append("\(reg) — \(type.capitalized) (expired \(abs(days))d ago)")
+            }
+        }
+
+        if !expired.isEmpty {
+            expiredDocsSummary = expired
+            showExpiredDocsAlert = true
+        }
     }
 
     // Bug 2: Load today's activity
@@ -943,7 +1172,12 @@ struct ManagerHomeView: View {
         fuelReq.predicate = dateRange
         fuelReq.sortDescriptors = [
             NSSortDescriptor(key: "date", ascending: false)]
-        todayFuelLogs = (try? context.fetch(fuelReq)) ?? []
+        let allFuelToday = (try? context.fetch(fuelReq)) ?? []
+        var seenFuelIds = Set<UUID>()
+        todayFuelLogs = allFuelToday.filter { log in
+            guard let id = log.id else { return false }
+            return seenFuelIds.insert(id).inserted
+        }
 
         let faultReq = FaultReportEntity.fetchRequest()
         faultReq.predicate = NSPredicate(
@@ -963,6 +1197,7 @@ struct ManagerHomeView: View {
 
     private func rebuildNotifications(from activeFaults: [FaultReportEntity]) {
         var items: [ManagerNotificationItem] = []
+        let readIds = readNotificationIDs
 
         let sortedFaults = activeFaults.sorted {
             ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
@@ -974,43 +1209,86 @@ struct ManagerHomeView: View {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let urgency = (fault.urgency ?? "medium").lowercased()
             let titlePrefix = (urgency == "high" || urgency == "critical") ? "Critical fault" : "Fault report"
+            let faultIdStr = fault.id?.uuidString ?? UUID().uuidString
 
             items.append(
                 ManagerNotificationItem(
-                    id: fault.id?.uuidString ?? UUID().uuidString,
+                    id: faultIdStr,
                     title: "\(titlePrefix): \(registration)",
                     subtitle: message.isEmpty ? "Driver submitted a fault report." : message,
                     date: fault.createdAt ?? Date(),
                     level: (urgency == "high" || urgency == "critical") ? .danger : .info
                 )
             )
-        }
-
-        for vehicle in fleetViewModel.vehicles {
-            guard let expiry = vehicle.licenceExpiry else {
-                continue
-            }
-
-            let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
-            guard days >= 0 && days <= 30 else {
-                continue
-            }
-
-            let registration = vehicle.registration?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cleanRegistration = (registration?.isEmpty == false) ? registration! : "Vehicle"
-
-            items.append(
-                ManagerNotificationItem(
-                    id: "licence-\(vehicle.id?.uuidString ?? UUID().uuidString)",
-                    title: "Licence expiry: \(cleanRegistration)",
-                    subtitle: "Revenue licence expires in \(days) day(s).",
-                    date: expiry,
-                    level: days <= 7 ? .danger : .warning
+            
+            if let fId = fault.id, !readIds.contains(fId.uuidString) {
+                NotificationService.shared.fireManagerFaultIfNeeded(
+                    vehicleReg: registration,
+                    description: message,
+                    urgency: urgency,
+                    faultId: fId
                 )
-            )
+            }
         }
 
-        let readIds = readNotificationIDs
+        // Check insurance AND licence expiry for every vehicle (expired + upcoming 30 days).
+        for vehicle in fleetViewModel.vehicles {
+            let reg = vehicle.registration?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanReg = reg?.isEmpty == false ? reg! : "Vehicle"
+            let vid = vehicle.id?.uuidString ?? UUID().uuidString
+
+            if let expiry = vehicle.licenceExpiry {
+                let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: expiry)).day ?? 0
+                if days <= 30 {
+                    items.append(expiryNotificationItem(
+                        id: "licence-\(vid)-\(expiry.timeIntervalSince1970)",
+                        reg: cleanReg,
+                        type: "Revenue Licence",
+                        days: days,
+                        expiry: expiry))
+                }
+            }
+
+            if let expiry = vehicle.insuranceExpiry {
+                let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: expiry)).day ?? 0
+                if days <= 30 {
+                    items.append(expiryNotificationItem(
+                        id: "insurance-\(vid)-\(expiry.timeIntervalSince1970)",
+                        reg: cleanReg,
+                        type: "Insurance",
+                        days: days,
+                        expiry: expiry))
+                }
+            }
+        }
+
+        // Check DocumentEntity (e.g. emission test) expiry.
+        let docRequest = DocumentEntity.fetchRequest()
+        if let docs = try? context.fetch(docRequest) {
+            for doc in docs {
+                guard let type = doc.type,
+                      let expiry = doc.expiryDate,
+                      let vehicleId = doc.vehicleId,
+                      let matchedVehicle = fleetViewModel.vehicles.first(where: { $0.id == vehicleId })
+                else { continue }
+
+                let typeLC = type.lowercased()
+                guard typeLC != "insurance" && typeLC != "licence" else { continue }
+
+                let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: expiry)).day ?? 0
+                guard days <= 30 else { continue }
+
+                let reg = matchedVehicle.registration ?? "Vehicle"
+                let vid = matchedVehicle.id?.uuidString ?? UUID().uuidString
+                items.append(expiryNotificationItem(
+                    id: "doc-\(vid)-\(expiry.timeIntervalSince1970)",
+                    reg: reg,
+                    type: type.capitalized,
+                    days: days,
+                    expiry: expiry))
+            }
+        }
+
         notifications = items
             .sorted { $0.date > $1.date }
             .map { item in
@@ -1023,6 +1301,43 @@ struct ManagerHomeView: View {
             .first(where: { !$0.isRead })?.subtitle
             ?? notifications.first?.subtitle
             ?? "No critical alerts right now."
+    }
+
+    private func expiryNotificationItem(
+        id: String,
+        reg: String,
+        type: String,
+        days: Int,
+        expiry: Date
+    ) -> ManagerNotificationItem {
+        let title: String
+        let subtitle: String
+        let level: ManagerNotificationItem.Level
+        let notifDate: Date
+
+        if days < 0 {
+            title = "EXPIRED: \(type) — \(reg)"
+            subtitle = "\(reg) \(type) EXPIRED \(abs(days)) day(s) ago! Renew immediately."
+            level = .danger
+            notifDate = Date()
+        } else if days == 0 {
+            title = "Expires TODAY: \(type) — \(reg)"
+            subtitle = "\(reg) \(type) expires TODAY. Renew immediately."
+            level = .danger
+            notifDate = expiry
+        } else if days <= 7 {
+            title = "URGENT: \(type) expiring — \(reg)"
+            subtitle = "\(reg) \(type) expires in \(days) day(s)."
+            level = .danger
+            notifDate = expiry
+        } else {
+            title = "\(type) expiry: \(reg)"
+            subtitle = "\(reg) \(type) expires in \(days) day(s). Renew to avoid fines."
+            level = .warning
+            notifDate = expiry
+        }
+
+        return ManagerNotificationItem(id: id, title: title, subtitle: subtitle, date: notifDate, level: level)
     }
 
     private func registrationForFault(_ fault: FaultReportEntity) -> String {

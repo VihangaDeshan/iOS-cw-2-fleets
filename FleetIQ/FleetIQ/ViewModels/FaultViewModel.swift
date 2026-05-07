@@ -23,6 +23,8 @@ final class FaultViewModel: ObservableObject {
     @Published var isSending: Bool = false
     @Published var openFaultCount: Int = 0
     @Published private(set) var faultPhotoReferences: [UUID: [String]] = [:]
+    @Published private(set) var readNotificationIds: Set<String> = []
+    @Published var photoUploadFailed: Bool = false
 
     // MARK: - Private Properties
     private let context = PersistenceController.shared.viewContext
@@ -32,6 +34,8 @@ final class FaultViewModel: ObservableObject {
 
     private var managerFaultListener: ListenerRegistration?
     private var myFaultListener: ListenerRegistration?
+    private var currentFleetId: String = ""
+    private var hasBackfilledFaults = false
 
     // MARK: - Lifecycle
     deinit {
@@ -73,6 +77,7 @@ final class FaultViewModel: ObservableObject {
         }
 
         isSending = true
+        photoUploadFailed = false
         defer { isSending = false }
 
         let faultUUID = UUID()
@@ -109,16 +114,24 @@ final class FaultViewModel: ObservableObject {
                 #endif
 
                 if shouldUsePendingStoragePath(for: error) {
+                    // Storage accepted the upload but the URL isn't readable yet; retry later.
                     photoReferences.append("storage_path:\(path)")
                 } else {
+                    // Hard upload failure (e.g. permission denied). Signal to the UI but
+                    // do NOT store "upload_failed" as a URL in Firestore.
                     hadUploadFailure = true
+                    photoUploadFailed = true
                 }
             }
         }
 
+        // Only include real references (http URLs or pending storage paths) in Firestore.
+        // Never write "upload_failed" strings — they would persist as garbage data.
         let primaryPhotoReference = photoReferences.first(where: { $0.hasPrefix("http") })
-            ?? photoReferences.first
-            ?? (hadUploadFailure ? "upload_failed" : nil)
+            ?? photoReferences.first(where: { $0.hasPrefix("storage_path:") })
+            ?? nil
+
+        _ = hadUploadFailure
 
         // 3) Prepare payload
         var payload: [String: Any] = [
@@ -143,7 +156,14 @@ final class FaultViewModel: ObservableObject {
             payload["photoURLs"] = photoReferences
         }
 
-        // 4) Save locally BEFORE attempting cloud save to avoid duplicates
+        // 4) Attempt cloud save FIRST to ensure synchronization
+        try await firestoreService.saveFaultReport(
+            payload,
+            fleetId: normalizedFleetId,
+            faultId: faultUUID.uuidString
+        )
+
+        // 5) If cloud save succeeded, save locally
         let localFault = upsertFaultEntity(with: faultUUID)
         localFault.vehicleId = vehicleUUID
         localFault.driverId = normalizedDriverId
@@ -161,25 +181,12 @@ final class FaultViewModel: ObservableObject {
 
         do {
             try context.save()
+            
+            // Insert into in-memory lists for immediate UI feedback
+            myFaults.insert(localFault, at: 0)
+            recalculateOpenFaultCount()
         } catch {
-            // If local save fails, propagate as before
             throw NSError(domain: "FaultViewModel", code: -30, userInfo: [NSLocalizedDescriptionKey: "Failed to save fault locally."])
-        }
-
-        // Insert into in-memory lists for immediate UI feedback
-        myFaults.insert(localFault, at: 0)
-        recalculateOpenFaultCount()
-
-        // 5) Attempt cloud save; if it fails we keep the local record and report error to caller
-        do {
-            try await firestoreService.saveFaultReport(
-                payload,
-                fleetId: normalizedFleetId,
-                faultId: faultUUID.uuidString
-            )
-        } catch {
-            // leave local record intact; bubble error so callers can inform the user
-            throw error
         }
 
         return faultUUID
@@ -195,6 +202,9 @@ final class FaultViewModel: ObservableObject {
             recalculateOpenFaultCount()
             return
         }
+
+        currentFleetId = normalizedFleetId
+        hasBackfilledFaults = false
 
         managerFaultListener = firestoreService.listenToFaultReports(fleetId: normalizedFleetId) { [weak self] docs in
             guard let self else {
@@ -261,6 +271,12 @@ final class FaultViewModel: ObservableObject {
         recalculateOpenFaultCount()
     }
 
+    /// Marks all current driver notifications as read locally without touching fault status in Firebase.
+    func markNotificationsRead() {
+        let ids = myFaults.compactMap { $0.id?.uuidString }
+        readNotificationIds.formUnion(ids)
+    }
+
     /// Returns all known photo references for a fault (URLs or storage placeholders).
     func photoReferences(for fault: FaultReportEntity) -> [String] {
         if let faultId = fault.id,
@@ -300,18 +316,27 @@ final class FaultViewModel: ObservableObject {
         case .manager:
             let existingIds = Set(faultReports.compactMap { $0.id })
             let isInitialLoad = existingIds.isEmpty
-            
+
             faultReports = sorted
-            
+
+            // One-time backfill: upload any CoreData faults missing from Firestore
+            if !hasBackfilledFaults && !currentFleetId.isEmpty {
+                hasBackfilledFaults = true
+                let firestoreIds = Set(docs.map { $0.documentID })
+                Task {
+                    await backfillMissingFaults(firestoreIds: firestoreIds)
+                }
+            }
+
             if !isInitialLoad {
                 for fault in sorted {
                     guard let faultId = fault.id, !existingIds.contains(faultId) else { continue }
-                    
+
                     Task {
                         let reg = fault.vehicleId.flatMap { vehicleId in
                             try? context.fetch(NSFetchRequest<VehicleEntity>(entityName: "VehicleEntity")).first(where: { $0.id == vehicleId })?.registration
                         } ?? "Vehicle"
-                        
+
                         NotificationService.shared.sendNewFaultToManager(
                             vehicleReg: reg,
                             description: fault.descriptionText ?? "",
@@ -321,26 +346,48 @@ final class FaultViewModel: ObservableObject {
                 }
             }
         case .driver:
-            // Capture previous statuses before replacing
-            var prevStatuses: [UUID: String] = [:]
-            for fault in myFaults {
-                if let id = fault.id {
-                    prevStatuses[id] = fault.status ?? ""
-                }
-            }
             myFaults = sorted
             // Fire notification for any status that changed
             for fault in sorted {
                 guard let faultId = fault.id else { continue }
                 notifyDriverIfStatusChanged(
                     faultId: faultId,
-                    previousStatus: prevStatuses[faultId] ?? "",
                     newStatus: fault.status ?? "",
                     description: fault.descriptionText ?? "")
             }
         }
 
         recalculateOpenFaultCount()
+    }
+
+    private func backfillMissingFaults(firestoreIds: Set<String>) async {
+        let fetchRequest = NSFetchRequest<FaultReportEntity>(entityName: "FaultReportEntity")
+        let allLocal = (try? context.fetch(fetchRequest)) ?? []
+
+        let localOnly = allLocal.filter { fault in
+            guard let id = fault.id?.uuidString else { return false }
+            return !firestoreIds.contains(id)
+        }
+
+        for fault in localOnly {
+            guard let faultId = fault.id?.uuidString else { continue }
+            var payload: [String: Any] = [
+                "id": faultId,
+                "driverId": fault.driverId ?? "",
+                "descriptionText": fault.descriptionText ?? "",
+                "description": fault.descriptionText ?? "",
+                "urgency": fault.urgency ?? "medium",
+                "status": fault.status ?? "open",
+                "latitude": fault.latitude,
+                "longitude": fault.longitude,
+                "createdAt": Timestamp(date: fault.createdAt ?? Date()),
+                "updatedAt": Timestamp(date: Date())
+            ]
+            if let vehicleId = fault.vehicleId?.uuidString { payload["vehicleId"] = vehicleId }
+            if let photoURL = fault.photoURL, !photoURL.isEmpty { payload["photoURL"] = photoURL }
+
+            try? await firestoreService.saveFaultReport(payload, fleetId: currentFleetId, faultId: faultId)
+        }
     }
 
     private func upsertFaultEntity(from doc: QueryDocumentSnapshot, fleetId: String?) -> FaultReportEntity {
@@ -536,15 +583,23 @@ final class FaultViewModel: ObservableObject {
 
     private func notifyDriverIfStatusChanged(
         faultId: UUID,
-        previousStatus: String,
         newStatus: String,
         description: String
     ) {
-        let current  = newStatus
-            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let previous = previousStatus
-            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard current != previous, !current.isEmpty else { return }
+        let current = newStatus.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !current.isEmpty else { return }
+
+        let key = "notified_status_\(faultId.uuidString)"
+        let previous = UserDefaults.standard.string(forKey: key) ?? ""
+
+        guard current != previous else { return }
+        
+        UserDefaults.standard.set(current, forKey: key)
+
+        if previous.isEmpty && current == "open" { return }
+
+        // Status changed — remove from read set so the bell badge reappears
+        readNotificationIds.remove(faultId.uuidString)
 
         NotificationService.shared.sendFaultStatusUpdate(
             newStatus: current,

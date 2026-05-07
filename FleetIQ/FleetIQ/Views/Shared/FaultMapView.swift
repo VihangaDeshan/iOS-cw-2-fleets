@@ -2,7 +2,7 @@
 //  FaultMapView.swift
 //  FleetIQ
 //
-//  Created by GitHub Copilot on 2026-05-04.
+
 //
 
 import SwiftUI
@@ -101,14 +101,15 @@ struct FaultMapView: View {
                                 .foregroundStyle(.secondary)
 
                             if let phone = garage.phone {
-                                Label(phone, systemImage: "phone.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(.green)
-                                    .onTapGesture {
-                                        if let url = URL(string: "tel:\(phone.filter { !$0.isWhitespace })") {
-                                            UIApplication.shared.open(url)
-                                        }
+                                Button {
+                                    if let url = URL(string: "tel://\(phone.filter { $0.isNumber || $0 == "+" })") {
+                                        UIApplication.shared.open(url)
                                     }
+                                } label: {
+                                    Label(phone, systemImage: "phone.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.green)
+                                }
                             } else {
                                 Label("Phone not listed", systemImage: "phone.slash")
                                     .font(.caption)

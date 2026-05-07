@@ -14,6 +14,7 @@ import Firebase
 import FirebaseCore
 import FirebaseFirestore
 #endif
+import FirebaseAuth
 import UserNotifications
 
 // MARK: - Firebase Bootstrap
@@ -84,6 +85,14 @@ struct FleetIQApp: App {
 
         _authViewModel = StateObject(wrappedValue: AuthViewModel())
 
+        // Firebase stores auth tokens in the iOS Keychain, which survives app deletion.
+        // On a fresh install hasSeenOnboarding=false but Firebase would silently restore
+        // the previous session and skip login entirely. Force sign-out here so the
+        // auth state listener starts with a clean slate and the user must log in again.
+        if !hasSeenOnboarding {
+            try? Auth.auth().signOut()
+        }
+
         if faceIDEnabled {
             isUnlocked = false
         }
@@ -99,17 +108,9 @@ struct FleetIQApp: App {
                 } else if faceIDEnabled && !isUnlocked {
                     LockScreenView()
                 } else if !authViewModel.isAuthenticated {
-                    if faceIDEnabled {
-                        NavigationStack {
-                            LoginView(
-                                role: rememberedRoleForQuickLogin,
-                                showsBackButton: false,
-                                showChangeRoleAction: true
-                            )
-                        }
-                    } else {
-                        RoleSelectionView()
-                    }
+                    // Always show role selection when not logged in —
+                    // covers both onboarding paths (enable Face ID / skip).
+                    RoleSelectionView()
                 } else if authViewModel.userRole.isEmpty {
                     AuthLoadingView()
                 } else if authViewModel.userRole == "manager" {
@@ -126,6 +127,16 @@ struct FleetIQApp: App {
             }
             .onChange(of: scenePhase) { _, phase in
                 handleScenePhaseChange(phase)
+            }
+            .onChange(of: isUnlocked) { _, unlocked in
+                guard unlocked,
+                      authViewModel.isAuthenticated,
+                      !authViewModel.userRole.isEmpty else { return }
+                NotificationService.shared.resetSessionState()
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    NotificationCenter.default.post(name: .appSessionDidActivate, object: nil)
+                }
             }
             .onChange(of: authViewModel.userRole) { _, role in
                 let normalizedRole = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -148,14 +159,28 @@ struct FleetIQApp: App {
     /// Applies lock behavior for app lifecycle transitions.
     /// - Parameter phase: Current SwiftUI scene phase.
     private func handleScenePhaseChange(_ phase: ScenePhase) {
-        guard faceIDEnabled else {
+        if phase == .background && faceIDEnabled {
+            isUnlocked = false
             return
         }
 
-        if phase == .background {
-            isUnlocked = false
+        if phase == .active {
+            // When Face ID is required, defer triggering until isUnlocked fires.
+            let isLocked = faceIDEnabled && !isUnlocked
+            guard !isLocked,
+                  authViewModel.isAuthenticated,
+                  !authViewModel.userRole.isEmpty else { return }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                NotificationCenter.default.post(name: .appSessionDidActivate, object: nil)
+            }
         }
     }
+}
+
+// MARK: - Session Activation Notification
+extension Notification.Name {
+    static let appSessionDidActivate = Notification.Name("FleetIQ.appSessionDidActivate")
 }
 
 // MARK: - Temporary Dashboard Placeholders

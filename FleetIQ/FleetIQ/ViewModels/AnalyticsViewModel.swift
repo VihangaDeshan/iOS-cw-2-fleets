@@ -39,23 +39,22 @@ final class AnalyticsViewModel: ObservableObject {
             let startOfMonth = calendar.date(
                 from: calendar.dateComponents(
                     [.year, .month], from: selectedMonth)),
-            let endOfMonth = calendar.date(
-                byAdding: DateComponents(month: 1, day: -1),
-                to: startOfMonth)
+            let nextMonth = calendar.date(
+                byAdding: .month, value: 1, to: startOfMonth)
         else { return }
 
         let serviceReq = ServiceRecordEntity.fetchRequest()
         serviceReq.predicate = NSPredicate(
-            format: "date >= %@ AND date <= %@",
+            format: "date >= %@ AND date < %@",
             startOfMonth as CVarArg,
-            endOfMonth as CVarArg)
+            nextMonth as CVarArg)
         let serviceRecords = (try? context.fetch(serviceReq)) ?? []
 
         let fuelReq = FuelLogEntity.fetchRequest()
         fuelReq.predicate = NSPredicate(
-            format: "date >= %@ AND date <= %@",
+            format: "date >= %@ AND date < %@",
             startOfMonth as CVarArg,
-            endOfMonth as CVarArg)
+            nextMonth as CVarArg)
         let fuelLogs = (try? context.fetch(fuelReq)) ?? []
 
         var vehicleMap: [UUID: Double] = [:]
