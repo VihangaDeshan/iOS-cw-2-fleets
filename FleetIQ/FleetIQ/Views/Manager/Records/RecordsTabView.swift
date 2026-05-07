@@ -71,7 +71,9 @@ struct RecordsTabView: View {
                     HStack {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary)
-                        TextField("Search", text: $searchText)
+                            .font(.subheadline)
+                        TextField("Search records", text: $searchText)
+                            .font(.subheadline)
                         if !searchText.isEmpty {
                             Button {
                                 searchText = ""
@@ -81,9 +83,10 @@ struct RecordsTabView: View {
                             }
                         }
                     }
-                    .padding(10)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
                     .background(Color(.systemGray6))
-                    .cornerRadius(10)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .padding(.horizontal, 16)
                     
                     // Filter Strip
@@ -94,11 +97,11 @@ struct RecordsTabView: View {
                                     selectedFilter = filter
                                 } label: {
                                     Text(filter)
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
-                                        .background(selectedFilter == filter ? Color.navyPrimary.opacity(0.1) : Color(.systemGray6))
-                                        .foregroundColor(selectedFilter == filter ? .navyPrimary : .primary)
+                                        .font(.subheadline.weight(.semibold))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 7)
+                                        .background(selectedFilter == filter ? Color.navyPrimary : Color(.systemGray5))
+                                        .foregroundColor(selectedFilter == filter ? .white : .primary)
                                         .clipShape(Capsule())
                                 }
                             }
@@ -143,13 +146,13 @@ struct RecordsTabView: View {
     private func sectionView(title: String, records: [UnifiedRecord]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.system(size: 12, weight: .bold))
+                .font(.caption.weight(.semibold))
                 .foregroundColor(.secondary)
                 .tracking(1.0)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 ForEach(records) { record in
                     recordCard(record)
                 }
@@ -163,17 +166,17 @@ struct RecordsTabView: View {
         HStack(spacing: 12) {
             // Icon
             ZStack {
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 12)
                     .fill(iconBackgroundColor(for: record.type))
                     .frame(width: 44, height: 44)
                 
                 Image(systemName: iconName(for: record.type))
                     .foregroundColor(iconColor(for: record.type))
-                    .font(.system(size: 20))
+                    .font(.system(size: 20, weight: .medium))
             }
             
             // Text
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(record.title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.primary)
@@ -189,18 +192,17 @@ struct RecordsTabView: View {
                 destinationView(for: record)
             } label: {
                 Text("View")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.blue)
-                    .padding(.horizontal, 16)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.navyPrimary)
+                    .padding(.horizontal, 14)
                     .padding(.vertical, 6)
-                    .background(Color.blue.opacity(0.1))
+                    .background(Color.navyPrimary.opacity(0.1))
                     .clipShape(Capsule())
             }
         }
         .padding(12)
-        .background(Color.white)
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: - Helpers

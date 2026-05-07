@@ -409,18 +409,57 @@ struct ManagerHomeView: View {
     }
 
     var riskHeroCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("→  \(openFaultCount) VEHICLE FAULT")
-                .font(.title2.weight(.bold))
-                .foregroundColor(.white)
+        VStack(alignment: .leading, spacing: 14) {
+            Text("RISK SUMMARY")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.white.opacity(0.65))
+                .tracking(0.5)
 
-            Text("→  \(expiringInsuranceCount) INSURANCE WILL EXPIRE SOON")
-                .font(.title2.weight(.bold))
-                .foregroundColor(.white)
+            HStack(spacing: 20) {
+                // Fault Count metric
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(openFaultCount)")
+                        .font(.system(size: 44, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.8))
+                        Text("Open Faults")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                }
+
+                Divider()
+                    .frame(width: 1, height: 48)
+                    .background(Color.white.opacity(0.3))
+
+                // Insurance Expiry metric
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(expiringInsuranceCount)")
+                        .font(.system(size: 44, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "shield.slash.fill")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.8))
+                        Text("Insurance Expiring")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                }
+            }
 
             Text(latestCriticalMessage)
                 .font(.caption)
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.white.opacity(0.75))
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -503,18 +542,20 @@ struct ManagerHomeView: View {
     var urgentAlertsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Urgent Alerts")
+                Text("URGENT ALERTS")
                     .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(0.5)
 
                 Spacer()
 
                 Button("See All") {
                     showFaults = true
                 }
-                .font(.caption)
-                .foregroundColor(.blue)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.navyPrimary)
             }
-            .padding(.top, 14)
+            .padding(.top, 16)
 
             // Deduplicate by registration to handle CoreData duplicates
             let overdue: [VehicleEntity] = {
@@ -557,14 +598,13 @@ struct ManagerHomeView: View {
                         .foregroundColor(.statusActive)
 
                     Text("No urgent alerts today")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
-                .padding(12)
+                .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.white)
-                .cornerRadius(12)
-                .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             } else {
                 ScrollView(.vertical, showsIndicators: true) {
                     VStack(spacing: 8) {
@@ -676,13 +716,14 @@ struct ManagerHomeView: View {
             Image(systemName: icon)
                 .font(.title3)
                 .foregroundColor(iconColour)
-                .frame(width: 34, height: 34)
+                .frame(width: 36, height: 36)
                 .background(iconBg)
-                .cornerRadius(9)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
 
                 Text(subtitle)
                     .font(.caption)
@@ -692,21 +733,22 @@ struct ManagerHomeView: View {
             Spacer()
 
             Image(systemName: "chevron.right")
-                .font(.caption)
+                .font(.caption.weight(.medium))
                 .foregroundColor(Color(.systemGray3))
         }
         .padding(12)
-        .background(Color.white)
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: - Quick Actions
     var quickActionsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Quick Actions")
+            Text("QUICK ACTIONS")
                 .font(.caption.weight(.semibold))
-                .padding(.top, 14)
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+                .padding(.top, 16)
 
             LazyVGrid(
                 columns: [GridItem(.flexible()), GridItem(.flexible())],
@@ -771,9 +813,9 @@ struct ManagerHomeView: View {
                 Image(systemName: icon)
                     .font(.title3)
                     .foregroundColor(.navyPrimary)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 38, height: 38)
                     .background(iconBg)
-                    .cornerRadius(10)
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -793,9 +835,8 @@ struct ManagerHomeView: View {
             }
             .padding(12)
             .frame(minHeight: 94)
-            .background(Color.white)
-            .cornerRadius(12)
-            .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .accessibilityLabel(title)
         .accessibilityHint(subtitle)
@@ -861,18 +902,20 @@ struct ManagerHomeView: View {
     var todayActivitySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Today's Activity")
+                Text("TODAY'S ACTIVITY")
                     .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(0.5)
 
                 Spacer()
 
                 Button("All Records") {
                     showRecords = true
                 }
-                .font(.caption)
-                .foregroundColor(.blue)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.navyPrimary)
             }
-            .padding(.top, 14)
+            .padding(.top, 16)
 
             let unifiedActivities = combinedTodayActivity
             let totalToday = unifiedActivities.count
@@ -882,14 +925,13 @@ struct ManagerHomeView: View {
                     Image(systemName: "moon.zzz")
                         .foregroundColor(.secondary)
                     Text("No activity logged today")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(Color.white)
-                .cornerRadius(12)
-                .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+                .padding(14)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             } else {
                 VStack(spacing: 0) {
                     let top5 = Array(unifiedActivities.prefix(5))
@@ -907,9 +949,8 @@ struct ManagerHomeView: View {
                         }
                     }
                 }
-                .background(Color.white)
-                .cornerRadius(12)
-                .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
     }
@@ -923,18 +964,18 @@ struct ManagerHomeView: View {
     ) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.caption.weight(.semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundColor(iconColor)
-                .frame(width: 26, height: 26)
+                .frame(width: 32, height: 32)
                 .background(iconColor.opacity(0.12))
                 .clipShape(Circle())
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.caption.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundColor(.primary)
                     .lineLimit(1)
                 Text(detail)
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }

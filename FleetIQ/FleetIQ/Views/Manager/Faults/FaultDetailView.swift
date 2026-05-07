@@ -106,18 +106,28 @@ struct FaultDetailView: View {
     }
 
     private var dangerBanner: some View {
-        HStack {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Color.statusOverdue)
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.statusOverdue.opacity(0.18))
+                    .frame(width: 44, height: 44)
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.statusOverdue)
+            }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("Active Fault Incident")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(Color.chipRedText)
 
-                Text("\(vehicleRegistration)  •  \(driverDisplayName)")
-                    .font(.subheadline)
+                Text(vehicleRegistration)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.primary)
+
+                Text(driverDisplayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Text(formattedDate(fault.createdAt))
                     .font(.caption)
@@ -129,16 +139,19 @@ struct FaultDetailView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.chipRedBg)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var descriptionCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Fault Description")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("FAULT DESCRIPTION")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
 
             Text(fault.descriptionText ?? "No description")
                 .font(.body)
+                .foregroundStyle(.primary)
 
             HStack(spacing: 8) {
                 Text(formattedUrgency(fault.urgency ?? "medium"))
@@ -149,21 +162,27 @@ struct FaultDetailView: View {
                     .background(urgencyColor(for: fault.urgency ?? "medium").opacity(0.14))
                     .clipShape(Capsule())
 
-                Text("Status: \(humanStatusText(from: fault.status ?? "open"))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(humanStatusText(from: fault.status ?? "open"))
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color(.systemGray5))
+                    .clipShape(Capsule())
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var photoCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Photo Evidence")
-                .font(.headline)
+            Text("PHOTO EVIDENCE")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
 
             if photoReferences.isEmpty {
                 photoPlaceholder(message: "No photo attached.")
@@ -196,7 +215,7 @@ struct FaultDetailView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var mapSection: some View {
@@ -245,21 +264,23 @@ struct FaultDetailView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white)
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Update Status")
-                    .font(.headline)
+                Text("UPDATE STATUS")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(0.5)
 
                 Spacer()
 
                 if isUpdatingStatus {
                     ProgressView()
+                        .scaleEffect(0.8)
                 }
             }
 
@@ -270,14 +291,14 @@ struct FaultDetailView: View {
             }
             .pickerStyle(.segmented)
 
-            Text("Changes sync to Firestore immediately and drivers receive updates in real time.")
+            Text("Changes sync to Firestore immediately. Drivers receive updates in real time.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func photoPreview(for reference: String) -> some View {
