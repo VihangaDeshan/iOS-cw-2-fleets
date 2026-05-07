@@ -14,6 +14,7 @@ import Firebase
 import FirebaseCore
 import FirebaseFirestore
 #endif
+import FirebaseAuth
 import UserNotifications
 
 // MARK: - Firebase Bootstrap
@@ -84,6 +85,14 @@ struct FleetIQApp: App {
 
         _authViewModel = StateObject(wrappedValue: AuthViewModel())
 
+        // Firebase stores auth tokens in the iOS Keychain, which survives app deletion.
+        // On a fresh install hasSeenOnboarding=false but Firebase would silently restore
+        // the previous session and skip login entirely. Force sign-out here so the
+        // auth state listener starts with a clean slate and the user must log in again.
+        if !hasSeenOnboarding {
+            try? Auth.auth().signOut()
+        }
+
         if faceIDEnabled {
             isUnlocked = false
         }
@@ -99,17 +108,9 @@ struct FleetIQApp: App {
                 } else if faceIDEnabled && !isUnlocked {
                     LockScreenView()
                 } else if !authViewModel.isAuthenticated {
-                    if faceIDEnabled {
-                        NavigationStack {
-                            LoginView(
-                                role: rememberedRoleForQuickLogin,
-                                showsBackButton: false,
-                                showChangeRoleAction: true
-                            )
-                        }
-                    } else {
-                        RoleSelectionView()
-                    }
+                    // Always show role selection when not logged in —
+                    // covers both onboarding paths (enable Face ID / skip).
+                    RoleSelectionView()
                 } else if authViewModel.userRole.isEmpty {
                     AuthLoadingView()
                 } else if authViewModel.userRole == "manager" {
