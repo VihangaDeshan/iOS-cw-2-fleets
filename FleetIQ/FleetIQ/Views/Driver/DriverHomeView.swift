@@ -15,6 +15,7 @@ struct DriverHomeView: View {
     @State private var showTripUnavailableAlert = false
     @State private var showDriverNotifications = false
     @State private var hasFireredLoginNotification = false
+    @State private var syncToggle = false
     @StateObject private var driverFaultVM = FaultViewModel()
 
     private var startKey: String {
@@ -25,6 +26,7 @@ struct DriverHomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
+                    let _ = syncToggle // Force redraw
                     headerSection
                     vehicleTitle
                     vehicleSection
@@ -70,6 +72,9 @@ struct DriverHomeView: View {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 NotificationService.shared.sendDriverWelcome(name: name)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DriverAnalyticsDidSync"))) { _ in
+            syncToggle.toggle()
         }
         .sheet(isPresented: $showDriverNotifications) {
             DriverNotificationsView(

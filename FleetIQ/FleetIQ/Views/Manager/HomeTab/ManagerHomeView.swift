@@ -181,6 +181,9 @@ struct ManagerHomeView: View {
                 loadHomeMetrics()
                 NotificationService.shared.sendManagerWelcome(name: authViewModel.currentUserName)
             }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("FleetAnalyticsDidSync"))) { _ in
+                loadHomeMetrics()
+            }
         }
     }
 
