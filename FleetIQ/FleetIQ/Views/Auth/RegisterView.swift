@@ -53,19 +53,19 @@ struct RegisterView: View {
                         Spacer()
 
                         Text("Register")
-                            .font(.system(size: 54, weight: .heavy))
+                            .font(.system(size: 40, weight: .heavy))
                             .foregroundStyle(.white)
 
                         Spacer()
                     }
 
                     Text(role == "manager" ? "Create Manager Account" : "Create Driver Account")
-                        .font(.system(size: 44, weight: .bold))
+                        .font(.title2.weight(.bold))
                         .foregroundStyle(.white)
-                        .padding(.top, 24)
+                        .padding(.top, 16)
 
                     Text("You will manage your fleet from this account")
-                        .font(.title3)
+                        .font(.subheadline)
                         .foregroundStyle(Color.white.opacity(0.42))
                         .padding(.bottom, 10)
 

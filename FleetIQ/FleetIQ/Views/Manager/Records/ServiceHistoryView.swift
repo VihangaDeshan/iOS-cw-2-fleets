@@ -156,7 +156,7 @@ struct ServiceHistoryView: View {
         }
         .padding(14)
         .background(isOverdue ? Color.statusOverdue.opacity(0.1) : Color(hex: "E8F0FB"))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .accessibilityLabel(isOverdue ? "Warning: Full service overdue. Next predicted at \(String(format: "%.0f", nextKm)) kilometers." : "Next service predicted at \(String(format: "%.0f", nextKm)) kilometers.")
@@ -207,7 +207,7 @@ struct ServiceHistoryView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color.white)
+        .background(Color(.systemBackground))
     }
 
     // MARK: - Row Helpers
@@ -224,7 +224,7 @@ struct ServiceHistoryView: View {
                 .foregroundColor(.navyPrimary)
                 .frame(width: 36, height: 36)
                 .background(Color(hex: "E8F0FB"))
-                .cornerRadius(9)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(record.serviceType ?? "Service")
@@ -241,7 +241,7 @@ struct ServiceHistoryView: View {
                 .lineLimit(1)
 
                 Text("Completed")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.caption2.weight(.bold))
                     .foregroundColor(.chipGreenText)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)

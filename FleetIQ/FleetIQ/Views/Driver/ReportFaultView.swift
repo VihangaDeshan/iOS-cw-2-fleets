@@ -210,7 +210,7 @@ struct ReportFaultView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("GPS INCLUDED")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.caption2.weight(.bold))
                     .tracking(0.5)
                 
                 Text("Your location is automatically captured.")

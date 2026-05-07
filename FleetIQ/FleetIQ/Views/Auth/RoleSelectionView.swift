@@ -33,11 +33,11 @@ struct RoleSelectionView: View {
 
                     VStack(spacing: 8) {
                         Text("Who are you?")
-                            .font(.system(size: 46, weight: .heavy))
+                            .font(.system(size: 38, weight: .heavy))
                             .foregroundStyle(.white)
 
                         Text("Select your role")
-                            .font(.title2)
+                            .font(.title3.weight(.medium))
                             .foregroundStyle(.white.opacity(0.72))
                     }
 
@@ -67,15 +67,18 @@ struct RoleSelectionView: View {
                     Spacer()
 
                     Button(action: continueTapped) {
-                        Text(buttonTitle)
-                            .font(.title2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 18)
-                            .background(
-                                RoundedRectangle(cornerRadius: 18)
-                                    .fill(Color.blue)
-                            )
+                        HStack(spacing: 10) {
+                            Text(buttonTitle)
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18)
+                                .fill(Color.blue)
+                        )
                     }
                     .padding(.bottom, 24)
 
@@ -116,11 +119,7 @@ struct RoleSelectionView: View {
 
     // MARK: - Private Computed Properties
     private var buttonTitle: String {
-        if selectedRole == .manager {
-            return "Continue as Manager ->"
-        }
-
-        return "Continue as Driver ->"
+        selectedRole == .manager ? "Continue as Manager" : "Continue as Driver"
     }
 }
 
@@ -136,15 +135,15 @@ private struct RoleCardView: View {
     var body: some View {
         VStack(spacing: 12) {
             Text(emoji)
-                .font(.system(size: 44))
+                .font(.system(size: 38))
 
             VStack(spacing: 5) {
                 Text(title)
-                    .font(.system(size: 40, weight: .bold))
+                    .font(.title.weight(.bold))
                     .foregroundStyle(.white)
 
                 Text(subtitle)
-                    .font(.title3)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white.opacity(0.55))
                     .multilineTextAlignment(.center)
             }

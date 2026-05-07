@@ -51,19 +51,19 @@ struct LoginView: View {
                     .padding(.top, 6)
 
                     Text("Sign in")
-                        .font(.system(size: 54, weight: .heavy))
+                        .font(.system(size: 40, weight: .heavy))
                         .foregroundStyle(.white)
 
                     Text("🚚")
-                        .font(.system(size: 54))
-                        .padding(.top, 24)
+                        .font(.system(size: 44))
+                        .padding(.top, 16)
 
                     Text("Welcome Back")
-                        .font(.system(size: 48, weight: .bold))
+                        .font(.system(size: 32, weight: .bold))
                         .foregroundStyle(.white)
 
                     Text(role == "manager" ? "Sign in as Manager" : "Sign in as Driver")
-                        .font(.title2)
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.white.opacity(0.45))
 
                     VStack(spacing: 14) {
@@ -153,7 +153,7 @@ struct LoginView: View {
                             .frame(height: 1)
 
                         Text("or")
-                            .font(.title3)
+                            .font(.subheadline.weight(.medium))
                             .foregroundStyle(Color.white.opacity(0.62))
 
                         Rectangle()
@@ -164,32 +164,32 @@ struct LoginView: View {
 
                     HStack(spacing: 30) {
                         Text("")
-                            .font(.system(size: 52, weight: .bold))
+                            .font(.system(size: 44, weight: .bold))
                             .foregroundStyle(.black)
-
+                        
                         Text("G")
-                            .font(.system(size: 52, weight: .bold))
+                            .font(.system(size: 40, weight: .bold))
                             .foregroundStyle(.white)
                             .overlay {
                                 Text("G")
-                                    .font(.system(size: 52, weight: .bold))
+                                    .font(.system(size: 40, weight: .bold))
                                     .foregroundStyle(Color.blue)
                                     .mask(
                                         Rectangle()
-                                            .frame(width: 50, height: 20)
-                                            .offset(y: 5)
+                                            .frame(width: 40, height: 16)
+                                            .offset(y: 4)
                                     )
                             }
                     }
 
                     HStack(spacing: 8) {
                         Text("Don't have an account?")
-                            .font(.title3)
+                            .font(.subheadline)
                             .foregroundStyle(Color.white.opacity(0.45))
-
+                        
                         NavigationLink(destination: RegisterView(role: role)) {
                             Text("Register")
-                                .font(.title3.weight(.bold))
+                                .font(.subheadline.weight(.bold))
                                 .foregroundStyle(Color.blue)
                         }
                     }

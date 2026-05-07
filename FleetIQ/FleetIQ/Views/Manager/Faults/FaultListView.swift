@@ -222,9 +222,9 @@ struct FaultListView: View {
                 // Details Button (Matching Fleet Card Style)
                 HStack(spacing: 4) {
                     Text("Details")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.caption2.weight(.semibold))
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.caption2.weight(.bold))
                 }
                 .foregroundColor(.navyPrimary)
                 .padding(.horizontal, 8)
@@ -240,7 +240,7 @@ struct FaultListView: View {
                 .padding(.top, 4)
         }
         .padding(12)
-        .background(Color.white) // Fault cards must be all white
+        .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
     }

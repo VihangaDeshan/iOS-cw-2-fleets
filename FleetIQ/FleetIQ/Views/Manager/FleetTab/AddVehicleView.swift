@@ -407,7 +407,7 @@ struct AddVehicleView: View {
                     ProgressView("Saving...")
                         .padding()
                         .background(Material.regular)
-                        .cornerRadius(12)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
         }

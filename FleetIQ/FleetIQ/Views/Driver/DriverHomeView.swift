@@ -194,7 +194,7 @@ struct DriverHomeView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(status.uppercased())
-                        .font(.system(size: 10, weight: .black))
+                        .font(.caption2.weight(.black))
                         .foregroundStyle(.white.opacity(0.8))
                         .tracking(1.5)
 
@@ -237,7 +237,7 @@ struct DriverHomeView: View {
     private func metricPill(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 9, weight: .bold))
+                .font(.caption2.weight(.bold))
                 .foregroundStyle(.white.opacity(0.6))
                 .tracking(0.5)
 
@@ -271,7 +271,7 @@ struct DriverHomeView: View {
                 .foregroundStyle(.primary)
 
             Text(title)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .tracking(0.5)
         }

@@ -104,7 +104,7 @@ struct FuelLogView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("FUEL EFFICIENCY")
-                        .font(.system(size: 10, weight: .black))
+                        .font(.caption2.weight(.black))
                         .foregroundStyle(.white.opacity(0.8))
                         .tracking(1.5)
 
@@ -125,7 +125,7 @@ struct FuelLogView: View {
                         .foregroundColor(.white)
                     
                     Text("KM/L AVERAGE")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.caption2.weight(.bold))
                         .foregroundColor(.white.opacity(0.7))
                 }
                 
@@ -137,7 +137,7 @@ struct FuelLogView: View {
                         .foregroundColor(.white)
                     
                     Text("SPENT THIS MONTH")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.caption2.weight(.bold))
                         .foregroundColor(.white.opacity(0.7))
                 }
             }
@@ -242,9 +242,9 @@ struct FuelLogView: View {
         
         HStack(spacing: 3) {
             Image(systemName: icon)
-                .font(.system(size: 8, weight: .bold))
+                .font(.caption2.weight(.bold))
             Text("\(String(format: "%.1f", eff)) km/L")
-                .font(.system(size: 10, weight: .bold))
+                .font(.caption2.weight(.bold))
         }
         .foregroundColor(color)
         .padding(.horizontal, 8)

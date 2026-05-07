@@ -94,7 +94,7 @@ struct TripLogView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("ACTIVITY SUMMARY")
-                        .font(.system(size: 10, weight: .black))
+                        .font(.caption2.weight(.black))
                         .foregroundStyle(.white.opacity(0.8))
                         .tracking(1.5)
                     
@@ -128,7 +128,7 @@ struct TripLogView: View {
     private func statBox(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 9, weight: .bold))
+                .font(.caption2.weight(.bold))
                 .foregroundColor(.white.opacity(0.6))
                 .tracking(0.5)
 

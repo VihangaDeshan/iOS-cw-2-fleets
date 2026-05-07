@@ -144,12 +144,12 @@ struct VehicleCardView: View {
                         .environmentObject(fleetViewModel)
                 } label: {
                     Text("Details ›")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.caption2.weight(.semibold))
                         .foregroundColor(.navyPrimary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(Color(hex: "E8F0FB"))
-                        .cornerRadius(7)
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
                 .accessibilityLabel("View details for \(vehicle.registration ?? "")")
             }
@@ -170,8 +170,8 @@ struct VehicleCardView: View {
             .padding(.top, 7)
         }
         .padding(12)
-        .background(Color.white)
-        .cornerRadius(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(

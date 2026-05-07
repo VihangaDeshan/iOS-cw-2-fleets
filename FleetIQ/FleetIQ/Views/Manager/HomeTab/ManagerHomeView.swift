@@ -320,7 +320,7 @@ struct ManagerHomeView: View {
                 endPoint: .bottomTrailing
             )
         )
-        .cornerRadius(14)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     var efficiencyHeroCard: some View {
@@ -375,7 +375,7 @@ struct ManagerHomeView: View {
                 endPoint: .bottomTrailing
             )
         )
-        .cornerRadius(14)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     /// Returns total spending for each of the last 7 months, oldest first.
@@ -471,7 +471,7 @@ struct ManagerHomeView: View {
                 endPoint: .bottomTrailing
             )
         )
-        .cornerRadius(14)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     var statusProgressBar: some View {

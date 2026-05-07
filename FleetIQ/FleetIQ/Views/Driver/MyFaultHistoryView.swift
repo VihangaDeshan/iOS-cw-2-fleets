@@ -209,7 +209,7 @@ struct MyFaultHistoryView: View {
                         Image(systemName: "location.fill")
                         Text(String(format: "GPS %.4f, %.4f", fault.latitude, fault.longitude))
                     }
-                    .font(.system(size: 10))
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                 }
             }

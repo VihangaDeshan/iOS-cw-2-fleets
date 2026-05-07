@@ -84,7 +84,7 @@ struct MyVehicleDetailView: View {
     private func statItem(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 9, weight: .bold))
+                .font(.caption2.weight(.bold))
                 .foregroundColor(.white.opacity(0.6))
                 .tracking(0.5)
 
@@ -150,7 +150,7 @@ struct MyVehicleDetailView: View {
             Spacer()
 
             Text(expiryChipText(for: date))
-                .font(.system(size: 10, weight: .bold))
+                .font(.caption2.weight(.bold))
                 .foregroundColor(expiryColor(for: date))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
@@ -167,7 +167,7 @@ struct MyVehicleDetailView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(record.serviceType?.uppercased() ?? "SERVICE")
-                            .font(.system(size: 10, weight: .black))
+                            .font(.caption2.weight(.black))
                             .foregroundStyle(.secondary)
                             .tracking(1)
                         

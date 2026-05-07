@@ -165,7 +165,7 @@ struct VehicleDetailView: View {
                 endPoint: .bottomTrailing
             )
         )
-        .cornerRadius(14)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "Vehicle \(viewModel.vehicle.registration ?? ""), \(fleetViewModel.vehicleStatus(viewModel.vehicle))"
@@ -180,7 +180,7 @@ struct VehicleDetailView: View {
     private func statItem(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 10))
+                .font(.caption2)
                 .foregroundColor(.white.opacity(0.5))
                 .tracking(0.3)
 
@@ -251,8 +251,8 @@ struct VehicleDetailView: View {
                     .foregroundColor(Color(.systemGray3))
             }
             .padding(13)
-            .background(Color.white)
-            .cornerRadius(12)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
         }
         .buttonStyle(.plain)
@@ -376,8 +376,8 @@ struct VehicleDetailView: View {
                 date: viewModel.vehicle.insuranceExpiry
             )
         }
-        .background(Color.white)
-        .cornerRadius(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
     }
 
@@ -514,8 +514,8 @@ struct VehicleDetailView: View {
                 showDocumentVault = true
             }
         }
-        .background(Color.white)
-        .cornerRadius(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
         .padding(.bottom, 8)
     }

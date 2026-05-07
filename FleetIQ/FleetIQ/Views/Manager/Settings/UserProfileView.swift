@@ -131,7 +131,7 @@ struct UserProfileView: View {
             Divider()
             profileFieldRow(label: "PHONE", text: $phone, editable: true)
         }
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -175,7 +175,7 @@ struct UserProfileView: View {
             .padding(.horizontal, 22)
             .padding(.vertical, 20)
         }
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
