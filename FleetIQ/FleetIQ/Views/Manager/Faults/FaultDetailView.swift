@@ -24,7 +24,7 @@ struct FaultDetailView: View {
     @State private var isResolving = false
     @State private var selectedPhotoIndex = 0
     @State private var nearbyGarages: [NominatimResult] = []
-    @State private var isLoadingGarages = false
+    @State private var isLoadingGarages = true
 
     @State private var vehicleRegistration = "Unknown Vehicle"
     @State private var driverDisplayName = "Driver"
@@ -76,8 +76,9 @@ struct FaultDetailView: View {
         }
         .task {
             hydrateInitialState()
-            await loadMetaDetails()
-            await loadNearbyGarages()
+            async let meta: Void = loadMetaDetails()
+            async let garages: Void = loadNearbyGarages()
+            _ = await (meta, garages)
         }
         .onChange(of: photoReferences.count) { _, newCount in
             if newCount == 0 {
