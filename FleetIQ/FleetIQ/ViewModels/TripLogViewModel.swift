@@ -149,7 +149,11 @@ final class TripLogViewModel: ObservableObject {
             return false
         }
 
-        let trip = TripLogEntity(context: context)
+        let upsertReq = NSFetchRequest<TripLogEntity>(entityName: "TripLogEntity")
+        upsertReq.fetchLimit = 1
+        upsertReq.predicate = NSPredicate(format: "id == %@", tripId as CVarArg)
+        
+        let trip = (try? context.fetch(upsertReq).first) ?? TripLogEntity(context: context)
         trip.id = tripId
         trip.vehicleId = vehicleId
         trip.driverId = normalizedDriverId
@@ -162,6 +166,19 @@ final class TripLogViewModel: ObservableObject {
 
         if let vehicle {
             vehicle.currentMileage = max(vehicle.currentMileage, endMileage)
+            
+            // Sync updated mileage to Firestore
+            do {
+                try await firestoreService.updateVehicle(
+                    fleetId: normalizedFleetId,
+                    vehicleId: vehicleId.uuidString,
+                    data: ["currentMileage": vehicle.currentMileage]
+                )
+            } catch {
+                #if DEBUG
+                print("Failed to sync updated mileage to Firestore: \(error.localizedDescription)")
+                #endif
+            }
         }
 
         do {

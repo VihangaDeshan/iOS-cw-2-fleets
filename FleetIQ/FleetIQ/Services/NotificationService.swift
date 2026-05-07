@@ -374,6 +374,9 @@ final class NotificationService {
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(
                 withIdentifiers: [identifier])
+        UNUserNotificationCenter.current()
+            .removeDeliveredNotifications(
+                withIdentifiers: [identifier])
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(
                 identifier: identifier,

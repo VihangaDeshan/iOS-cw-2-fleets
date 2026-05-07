@@ -236,9 +236,22 @@ struct ServiceHistoryView: View {
 
             Spacer()
 
-            Text("LKR \(String(format: "%.0f", record.costLKR))")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundColor(.navyPrimary)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text("LKR \(String(format: "%.0f", record.costLKR))")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.navyPrimary)
+                
+                Button(role: .destructive) {
+                    Task {
+                        await viewModel.deleteRecord(record, fleetId: authViewModel.fleetId)
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundColor(.red)
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.borderless)
+            }
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)

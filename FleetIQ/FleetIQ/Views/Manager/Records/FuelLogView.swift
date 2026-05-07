@@ -333,16 +333,18 @@ private struct AddFuelLogSheet: View {
 
     private let firestoreService = FirestoreService.shared
 
+    @State private var manualEfficiency = ""
+
     private var enteredMileage: Double? {
         Double(mileage.replacingOccurrences(of: ",", with: ""))
     }
 
-    private var estimatedEfficiency: String? {
+    private func updateEstimatedEfficiency() {
         guard previousMileage > 0,
               let m = enteredMileage, m > previousMileage,
               let l = Double(litres.replacingOccurrences(of: ",", with: "")), l > 0
-        else { return nil }
-        return String(format: "%.2f km/L", (m - previousMileage) / l)
+        else { return }
+        manualEfficiency = String(format: "%.2f", (m - previousMileage) / l)
     }
 
     var body: some View {
@@ -374,17 +376,14 @@ private struct AddFuelLogSheet: View {
                     TextField("Total Cost (LKR)", text: $totalCost)
                         .keyboardType(.decimalPad)
                 }
-
-                if let eff = estimatedEfficiency {
-                    Section("ESTIMATED EFFICIENCY") {
-                        HStack {
-                            Label("km / L", systemImage: "gauge.medium")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(eff)
-                                .font(.headline.weight(.bold))
-                                .foregroundStyle(Color.statusActive)
-                        }
+                
+                Section("EFFICIENCY") {
+                    HStack {
+                        Text("Efficiency (km/L)")
+                        Spacer()
+                        TextField("0.0", text: $manualEfficiency)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
                     }
                 }
 
@@ -413,15 +412,22 @@ private struct AddFuelLogSheet: View {
             }
             .disabled(isSaving)
             .onAppear { prefillMileage() }
+            .onChange(of: mileage) { _, _ in updateEstimatedEfficiency() }
+            .onChange(of: litres) { _, _ in updateEstimatedEfficiency() }
         }
     }
 
     private func prefillMileage() {
         guard let vehicleId = vehicle.id else { return }
-        let last = latestFuelLogMileage(for: vehicleId)
-        previousMileage = last
-        if last > 0 {
-            mileage = String(format: "%.0f", last)
+        
+        let lastFuel = latestFuelLogMileage(for: vehicleId)
+        previousMileage = lastFuel
+        
+        let current = vehicle.currentMileage
+        if current > 0 {
+            mileage = String(format: "%.0f", current)
+        } else if lastFuel > 0 {
+            mileage = String(format: "%.0f", lastFuel)
         }
     }
 
@@ -454,7 +460,12 @@ private struct AddFuelLogSheet: View {
         }
 
         let distance = max(0, mileageValue - previousMileage)
-        let efficiency = distance > 0 ? distance / litresValue : 0
+        var efficiency = distance > 0 ? distance / litresValue : 0
+        
+        if let manualEff = Double(manualEfficiency.replacingOccurrences(of: ",", with: "")), manualEff > 0 {
+            efficiency = manualEff
+        }
+        
         let logId = UUID()
 
         isSaving = true
