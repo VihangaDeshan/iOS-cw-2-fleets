@@ -13,6 +13,7 @@ struct ManageDriversView: View {
     @EnvironmentObject private var authViewModel: AuthViewModel
     @EnvironmentObject private var fleetViewModel: FleetViewModel
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.dismiss) private var dismiss
 
     @State private var drivers: [FleetDriverUser] = []
     @State private var searchText = ""
@@ -103,10 +104,8 @@ struct ManageDriversView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        showAddVehicle = true
-                    } label: {
-                        Label("Add Vehicle", systemImage: "car.fill")
+                    Button("Back") {
+                        dismiss()
                     }
                 }
 

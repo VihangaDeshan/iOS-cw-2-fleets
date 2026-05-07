@@ -109,6 +109,31 @@ final class AuthService {
                 continuation.resume(returning: ())
             }
         }
+
+        if normalizedRole == "driver" && !normalizedFleetId.isEmpty {
+            let driverData: [String: Any] = [
+                "id": authResult.user.uid,
+                "role": "driver",
+                "name": name,
+                "email": email,
+                "phone": "",
+                "assignedVehicleId": "",
+                "createdAt": FieldValue.serverTimestamp(),
+                "updatedAt": FieldValue.serverTimestamp()
+            ]
+            
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                firestore.collection("fleets").document(normalizedFleetId)
+                    .collection("drivers").document(authResult.user.uid)
+                    .setData(driverData) { error in
+                        if let error {
+                            continuation.resume(throwing: error)
+                            return
+                        }
+                        continuation.resume(returning: ())
+                    }
+            }
+        }
     }
 
     /// Sends password reset email via Firebase Auth.

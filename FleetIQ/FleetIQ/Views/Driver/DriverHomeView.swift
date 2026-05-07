@@ -166,8 +166,7 @@ struct DriverHomeView: View {
     }
 
     private func vehicleHeroCard(_ vehicle: VehicleEntity) -> some View {
-        let nextServiceMileage = viewModel.predictedNextServiceMileage(for: vehicle)
-        let remainingDays = max(Int(((nextServiceMileage - vehicle.currentMileage) / 15.0).rounded(.down)), 0)
+        let remainingDays = viewModel.daysUntilService(for: vehicle)
 
         return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
@@ -206,7 +205,7 @@ struct DriverHomeView: View {
 
             HStack(spacing: 12) {
                 metricPill(title: "TOTAL ODOMETER", value: String(format: "%.0f km", vehicle.currentMileage))
-                metricPill(title: "NEXT SERVICE", value: remainingDays == 0 ? "Due now" : "In \(remainingDays) days")
+                metricPill(title: "NEXT SERVICE", value: remainingDays < 0 ? "\(abs(remainingDays))d over" : (remainingDays == 0 ? "Due now" : "In \(remainingDays) days"))
             }
         }
         .padding(18)

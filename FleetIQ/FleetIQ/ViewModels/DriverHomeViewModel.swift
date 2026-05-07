@@ -106,6 +106,13 @@ final class DriverHomeViewModel: ObservableObject {
         return 80
     }
 
+    /// Returns days remaining until predicted service based on the dynamic true daily km.
+    func daysUntilService(for vehicle: VehicleEntity) -> Int {
+        let remainingMileage = predictedNextServiceMileage(for: vehicle) - vehicle.currentMileage
+        let dailyKm = averageDailyKm(for: vehicle)
+        return Int((remainingMileage / max(1, dailyKm)).rounded(.down))
+    }
+
     /// Returns a service status label based on predicted service due date.
     func serviceStatus(for vehicle: VehicleEntity) -> String {
         let remainingMileage = predictedNextServiceMileage(for: vehicle) - vehicle.currentMileage
@@ -227,43 +234,35 @@ final class DriverHomeViewModel: ObservableObject {
 
         let vehicleUUID = UUID(uuidString: vehicleId)
 
-        let tripRequest = NSFetchRequest<TripLogEntity>(entityName: "TripLogEntity")
+        let tripsToday: [TripLogEntity]
+        let fuelToday: [FuelLogEntity]
+
         if let vehicleUUID {
+            let tripRequest = NSFetchRequest<TripLogEntity>(entityName: "TripLogEntity")
             tripRequest.predicate = NSPredicate(
                 format: "date >= %@ AND date < %@ AND vehicleId == %@",
                 startOfDay as NSDate,
                 endOfDay as NSDate,
                 vehicleUUID as CVarArg
             )
-        } else {
-            tripRequest.predicate = NSPredicate(
-                format: "date >= %@ AND date < %@",
+            tripsToday = (try? context.fetch(tripRequest)) ?? []
+
+            let fuelRequest = NSFetchRequest<FuelLogEntity>(entityName: "FuelLogEntity")
+            fuelRequest.predicate = NSPredicate(
+                format: "date >= %@ AND date < %@ AND vehicleId == %@",
                 startOfDay as NSDate,
-                endOfDay as NSDate
+                endOfDay as NSDate,
+                vehicleUUID as CVarArg
             )
+            fuelToday = (try? context.fetch(fuelRequest)) ?? []
+        } else {
+            tripsToday = []
+            fuelToday = []
         }
 
-        let tripsToday = (try? context.fetch(tripRequest)) ?? []
         todayTrips = tripsToday.count
         todayKmDriven = tripsToday.reduce(0) { $0 + $1.distanceKm }
 
-        let fuelRequest = NSFetchRequest<FuelLogEntity>(entityName: "FuelLogEntity")
-        if let vehicleUUID {
-            fuelRequest.predicate = NSPredicate(
-                format: "date >= %@ AND date < %@ AND vehicleId == %@",
-                startOfDay as NSDate,
-                endOfDay as NSDate,
-                vehicleUUID as CVarArg
-            )
-        } else {
-            fuelRequest.predicate = NSPredicate(
-                format: "date >= %@ AND date < %@",
-                startOfDay as NSDate,
-                endOfDay as NSDate
-            )
-        }
-
-        let fuelToday = (try? context.fetch(fuelRequest)) ?? []
         var seenFuelIds = Set<UUID>()
         let uniqueFuelToday = fuelToday.filter { log in
             guard let id = log.id else { return false }
