@@ -41,13 +41,19 @@ struct FuelLogView: View {
                     description: Text("Tap + to add the first fuel fill-up")
                 )
             } else {
-                ForEach(logs, id: \.id) { log in
-                    row(for: log)
-                }
-                .onDelete { offsets in
-                    Task {
-                        await deleteLogs(at: offsets)
+                heroSection
+                
+                Section {
+                    ForEach(logs, id: \.id) { log in
+                        row(for: log)
                     }
+                    .onDelete { offsets in
+                        Task {
+                            await deleteLogs(at: offsets)
+                        }
+                    }
+                } header: {
+                    Text("FUEL LOG — \(currentMonthName())")
                 }
             }
         }
@@ -85,34 +91,140 @@ struct FuelLogView: View {
         }
     }
 
-    private func row(for log: FuelLogEntity) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    // MARK: - Hero Section
+    
+    private var heroSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("\((vehicle.registration ?? "UNKNOWN").uppercased()) — FUEL EFFICIENCY")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.white.opacity(0.8))
+                .tracking(1.0)
+            
             HStack {
-                Text(mediumDate(log.date ?? Date()))
-                    .font(.subheadline.weight(.semibold))
-
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: "%.1f km/L", averageEfficiency))
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.white)
+                    Text("AVERAGE")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                
                 Spacer()
-
-                Text("LKR \(String(format: "%.0f", log.totalCostLKR))")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundColor(.navyPrimary)
-            }
-
-            Text(
-                "\(String(format: "%.1f", log.litres)) L  ·  " +
-                "\(String(format: "%.0f", log.mileage)) km  ·  " +
-                "LKR \(String(format: "%.2f", log.costPerLitre))/L"
-            )
-            .font(.caption)
-            .foregroundColor(.secondary)
-
-            if log.kmPerLitre > 0 {
-                Text("Efficiency: \(String(format: "%.2f", log.kmPerLitre)) km/L")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundColor(.statusActive)
+                
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(formattedCostThisMonth)
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.white)
+                    Text("THIS MONTH")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                }
             }
         }
-        .padding(.vertical, 4)
+        .padding(20)
+        .background(
+            LinearGradient(
+                colors: [.navyPrimary, .navyPrimary.opacity(0.85)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(16)
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var averageEfficiency: Double {
+        let validLogs = logs.filter { $0.kmPerLitre > 0 }
+        guard !validLogs.isEmpty else { return 0 }
+        let total = validLogs.reduce(0) { $0 + $1.kmPerLitre }
+        return total / Double(validLogs.count)
+    }
+
+    private var costThisMonth: Double {
+        let calendar = Calendar.current
+        let currentMonth = calendar.component(.month, from: Date())
+        let currentYear = calendar.component(.year, from: Date())
+        
+        let monthLogs = logs.filter {
+            guard let d = $0.date else { return false }
+            return calendar.component(.month, from: d) == currentMonth &&
+                   calendar.component(.year, from: d) == currentYear
+        }
+        return monthLogs.reduce(0) { $0 + $1.totalCostLKR }
+    }
+    
+    private var formattedCostThisMonth: String {
+        if costThisMonth >= 1000 {
+            return String(format: "LKR %.0fK", costThisMonth / 1000)
+        } else {
+            return String(format: "LKR %.0f", costThisMonth)
+        }
+    }
+    
+    private func currentMonthName() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: Date()).uppercased()
+    }
+
+    // MARK: - Row View
+    
+    private func row(for log: FuelLogEntity) -> some View {
+        HStack(spacing: 16) {
+            // Icon
+            ZStack {
+                Circle()
+                    .fill(Color(.systemGray6))
+                    .frame(width: 44, height: 44)
+                
+                Image(systemName: "fuelpump")
+                    .foregroundColor(.navyPrimary)
+                    .font(.system(size: 20))
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(mediumDate(log.date ?? Date()))
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    Text("LKR \(String(format: "%.0f", log.totalCostLKR))")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.navyPrimary)
+                }
+                
+                HStack(spacing: 6) {
+                    Text("\(String(format: "%.1f", log.litres))L · \(String(format: "%.0f", log.mileage)) km ·")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    if log.kmPerLitre > 0 {
+                        efficiencyPill(for: log.kmPerLitre)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 8)
+    }
+    
+    @ViewBuilder
+    private func efficiencyPill(for eff: Double) -> some View {
+        let isGood = eff >= averageEfficiency
+        let color = isGood ? Color.green : Color.orange
+        let icon = isGood ? "▲" : "▼"
+        
+        Text("\(String(format: "%.1f", eff)) km/L \(icon)")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.15))
+            .cornerRadius(4)
     }
 
     private func loadLogs() {

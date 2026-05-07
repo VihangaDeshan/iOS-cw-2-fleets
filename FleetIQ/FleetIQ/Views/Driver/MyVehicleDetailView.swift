@@ -239,40 +239,49 @@ struct MyVehicleDetailView: View {
 
         let request = NSFetchRequest<ServiceRecordEntity>(entityName: "ServiceRecordEntity")
         request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
-        request.sortDescriptors = [NSSortDescriptor(key: "mileageAtService", ascending: true)]
+        request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
 
         do {
             let records = try context.fetch(request)
-            guard records.count >= 2 else {
-                return vehicle.currentMileage + 5000
-            }
-
-            var intervals: [Double] = []
-            for index in 1..<records.count {
-                let previous = records[index - 1].mileageAtService
-                let current = records[index].mileageAtService
-                let interval = current - previous
-                if interval > 0 {
-                    intervals.append(interval)
-                }
-            }
-
-            guard !intervals.isEmpty else {
-                return vehicle.currentMileage + 5000
-            }
-
-            let averageInterval = intervals.reduce(0, +) / Double(intervals.count)
-            let lastServiceMileage = records.last?.mileageAtService ?? vehicle.currentMileage
-            return lastServiceMileage + averageInterval
+            let lastFullService = records.first { ($0.serviceType ?? "").localizedCaseInsensitiveContains("Full Service") }
+            let lastMileage = lastFullService?.mileageAtService ?? (records.first?.mileageAtService ?? vehicle.currentMileage)
+            return lastMileage + 5000
         } catch {
             return vehicle.currentMileage + 5000
         }
     }
+    
+    private func averageDailyKm(for vehicle: VehicleEntity) -> Double {
+        guard let vehicleId = vehicle.id else {
+            return 80
+        }
+        
+        let request = NSFetchRequest<ServiceRecordEntity>(entityName: "ServiceRecordEntity")
+        request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
+        request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
+        
+        do {
+            let records = try context.fetch(request)
+            guard let first = records.first, let last = records.last, first.id != last.id,
+                  let firstDate = first.date, let lastDate = last.date else {
+                return 80 // fallback
+            }
+            
+            let days = Calendar.current.dateComponents([.day], from: firstDate, to: lastDate).day ?? 0
+            let kmDiff = last.mileageAtService - first.mileageAtService
+            
+            if days > 0 && kmDiff > 0 {
+                return kmDiff / Double(days)
+            }
+        } catch {}
+        
+        return 80
+    }
 
     private func daysLeftText(for vehicle: VehicleEntity) -> String {
         let remainingMileage = predictedNextServiceMileage(for: vehicle) - vehicle.currentMileage
-        let assumedDailyMileage = 15.0
-        let days = Int((remainingMileage / assumedDailyMileage).rounded(.down))
+        let dailyKm = averageDailyKm(for: vehicle)
+        let days = Int((remainingMileage / max(1, dailyKm)).rounded(.down))
 
         if days < 0 {
             return "\(abs(days))d over"
@@ -283,8 +292,8 @@ struct MyVehicleDetailView: View {
 
     private func serviceStatus(for vehicle: VehicleEntity) -> String {
         let remainingMileage = predictedNextServiceMileage(for: vehicle) - vehicle.currentMileage
-        let assumedDailyMileage = 15.0
-        let days = Int((remainingMileage / assumedDailyMileage).rounded(.down))
+        let dailyKm = averageDailyKm(for: vehicle)
+        let days = Int((remainingMileage / max(1, dailyKm)).rounded(.down))
 
         if days < 0 {
             return "Overdue"

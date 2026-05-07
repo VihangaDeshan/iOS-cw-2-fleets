@@ -217,6 +217,47 @@ final class ServiceLogViewModel: ObservableObject {
 
     // MARK: - Smart Scheduler
 
+    var lastFullService: ServiceRecordEntity? {
+        records.first { ($0.serviceType ?? "").localizedCaseInsensitiveContains("Full Service") }
+    }
+
+    var isFullServiceOverdue: Bool {
+        guard let last = lastFullService, let date = last.date else {
+            return true
+        }
+        let threeMonthsAgo = Calendar.current.date(byAdding: .month, value: -3, to: Date()) ?? Date()
+        return date < threeMonthsAgo
+    }
+
+    var nextFullServiceMileage: Double {
+        let lastMileage = lastFullService?.mileageAtService ?? (records.first?.mileageAtService ?? 0)
+        return lastMileage + 5000
+    }
+
+    var nextFullServiceDate: Date {
+        let lastDate = lastFullService?.date ?? (records.first?.date ?? Date())
+        let dailyKm = averageDailyKm()
+        let days = Int(5000 / max(1, dailyKm))
+        return Calendar.current.date(byAdding: .day, value: days, to: lastDate) ?? Date()
+    }
+    
+    /// Calculates average daily kilometers based on history.
+    func averageDailyKm() -> Double {
+        let sorted = records.sorted { ($0.date ?? Date()) < ($1.date ?? Date()) }
+        guard let first = sorted.first, let last = sorted.last, first.id != last.id,
+              let firstDate = first.date, let lastDate = last.date else {
+            return 80 // fallback
+        }
+        
+        let days = Calendar.current.dateComponents([.day], from: firstDate, to: lastDate).day ?? 0
+        let kmDiff = last.mileageAtService - first.mileageAtService
+        
+        if days > 0 && kmDiff > 0 {
+            return kmDiff / Double(days)
+        }
+        return 80
+    }
+
     /// Calculates average service interval in kilometers.
     /// - Returns: Average interval or 5000 when insufficient history exists.
     func averageServiceIntervalKm() -> Double {
