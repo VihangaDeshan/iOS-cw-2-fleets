@@ -22,9 +22,17 @@ final class NotificationService {
     }
     
     @objc private func handleAppBackground() {
+        resetSessionState()
+    }
+
+    /// Clears session-based deduplication so all notifications can re-fire.
+    /// Called on app background and on Face ID unlock.
+    func resetSessionState() {
         firedSessionExpiries.removeAll()
+        firedSessionFaults.removeAll()
         hasFiredDriverWelcome = false
         hasFiredManagerWelcome = false
+        nextNotificationDelay = 2.0
     }
 
     /// Requests notification permission from user.
@@ -177,6 +185,24 @@ final class NotificationService {
     // Tracks which expiry warnings have fired during this specific app session.
     // This resets when the app is fully closed and reopened.
     private var firedSessionExpiries = Set<String>()
+    private var firedSessionFaults = Set<String>()
+
+    func fireManagerFaultIfNeeded(
+        vehicleReg: String,
+        description: String,
+        urgency: String,
+        faultId: UUID
+    ) {
+        let sessionKey = "fault-\(faultId.uuidString)"
+        if !firedSessionFaults.contains(sessionKey) {
+            firedSessionFaults.insert(sessionKey)
+            sendNewFaultToManager(
+                vehicleReg: vehicleReg,
+                description: description,
+                urgency: urgency
+            )
+        }
+    }
 
     func rescheduleExpiryIfNeeded(
         vehicleRegistration: String,
@@ -326,7 +352,9 @@ final class NotificationService {
             identifier: "new-fault-\(UUID().uuidString)")
     }
 
-    /// Internal helper: fires a notification after 2 seconds.
+    /// Internal helper: fires a notification sequentially.
+    private var nextNotificationDelay: TimeInterval = 2.0
+
     private func sendImmediate(
         title: String,
         body: String,
@@ -338,8 +366,10 @@ final class NotificationService {
         content.sound = .default
 
         let trigger = UNTimeIntervalNotificationTrigger(
-            timeInterval: 2,
+            timeInterval: nextNotificationDelay,
             repeats: false)
+            
+        nextNotificationDelay += 1.5 // Stagger multiple notifications
 
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(

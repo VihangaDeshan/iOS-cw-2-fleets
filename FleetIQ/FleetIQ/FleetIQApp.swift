@@ -127,6 +127,16 @@ struct FleetIQApp: App {
             .onChange(of: scenePhase) { _, phase in
                 handleScenePhaseChange(phase)
             }
+            .onChange(of: isUnlocked) { _, unlocked in
+                guard unlocked,
+                      authViewModel.isAuthenticated,
+                      !authViewModel.userRole.isEmpty else { return }
+                NotificationService.shared.resetSessionState()
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    NotificationCenter.default.post(name: .appSessionDidActivate, object: nil)
+                }
+            }
             .onChange(of: authViewModel.userRole) { _, role in
                 let normalizedRole = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 guard !normalizedRole.isEmpty else {
@@ -148,14 +158,28 @@ struct FleetIQApp: App {
     /// Applies lock behavior for app lifecycle transitions.
     /// - Parameter phase: Current SwiftUI scene phase.
     private func handleScenePhaseChange(_ phase: ScenePhase) {
-        guard faceIDEnabled else {
+        if phase == .background && faceIDEnabled {
+            isUnlocked = false
             return
         }
 
-        if phase == .background {
-            isUnlocked = false
+        if phase == .active {
+            // When Face ID is required, defer triggering until isUnlocked fires.
+            let isLocked = faceIDEnabled && !isUnlocked
+            guard !isLocked,
+                  authViewModel.isAuthenticated,
+                  !authViewModel.userRole.isEmpty else { return }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                NotificationCenter.default.post(name: .appSessionDidActivate, object: nil)
+            }
         }
     }
+}
+
+// MARK: - Session Activation Notification
+extension Notification.Name {
+    static let appSessionDidActivate = Notification.Name("FleetIQ.appSessionDidActivate")
 }
 
 // MARK: - Temporary Dashboard Placeholders
