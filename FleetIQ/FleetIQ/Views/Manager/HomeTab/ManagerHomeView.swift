@@ -614,10 +614,16 @@ struct ManagerHomeView: View {
     @ViewBuilder
     private func expiryAlertRow(_ item: ManagerNotificationItem) -> some View {
         let vehicleIdStr: String? = {
-            if item.id.hasPrefix("licence-") {
-                return String(item.id.dropFirst("licence-".count))
-            } else if item.id.hasPrefix("insurance-") {
-                return String(item.id.dropFirst("insurance-".count))
+            if item.id.hasPrefix("licence-") || item.id.hasPrefix("insurance-") || item.id.hasPrefix("doc-") {
+                let withoutPrefix: String
+                if item.id.hasPrefix("licence-") { withoutPrefix = String(item.id.dropFirst("licence-".count)) }
+                else if item.id.hasPrefix("insurance-") { withoutPrefix = String(item.id.dropFirst("insurance-".count)) }
+                else { withoutPrefix = String(item.id.dropFirst("doc-".count)) }
+                
+                if let lastDashIndex = withoutPrefix.lastIndex(of: "-") {
+                    return String(withoutPrefix[..<lastDashIndex])
+                }
+                return withoutPrefix
             }
             return nil
         }()
@@ -1020,7 +1026,7 @@ struct ManagerHomeView: View {
 
         expiringInsuranceCount = fleetViewModel.vehicles.filter { vehicle in
             guard let expiry = vehicle.insuranceExpiry else { return false }
-            let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+            let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: expiry)).day ?? 0
             return days >= 0 && days <= 30
         }.count
 
@@ -1034,7 +1040,7 @@ struct ManagerHomeView: View {
             let reg = vehicle.registration ?? "Vehicle"
             
             if let insuranceExpiry = vehicle.insuranceExpiry, !seenInsurance.contains(reg) {
-                let days = Calendar.current.dateComponents([.day], from: Date(), to: insuranceExpiry).day ?? Int.min
+                let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: insuranceExpiry)).day ?? Int.min
                 if days <= 30 {
                     seenInsurance.insert(reg)
                 }
@@ -1045,7 +1051,7 @@ struct ManagerHomeView: View {
                     vehicleId: vehicleId)
             }
             if let licenceExpiry = vehicle.licenceExpiry, !seenLicence.contains(reg) {
-                let days = Calendar.current.dateComponents([.day], from: Date(), to: licenceExpiry).day ?? Int.min
+                let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: licenceExpiry)).day ?? Int.min
                 if days <= 30 {
                     seenLicence.insert(reg)
                 }
@@ -1073,7 +1079,7 @@ struct ManagerHomeView: View {
                 let key = "\(reg)-\(type.capitalized)"
                 
                 if !seenDocs.contains(key) {
-                    let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? Int.min
+                    let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: expiry)).day ?? Int.min
                     if days <= 30 {
                         seenDocs.insert(key)
                     }
@@ -1229,10 +1235,10 @@ struct ManagerHomeView: View {
             let vid = vehicle.id?.uuidString ?? UUID().uuidString
 
             if let expiry = vehicle.licenceExpiry {
-                let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+                let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: expiry)).day ?? 0
                 if days <= 30 {
                     items.append(expiryNotificationItem(
-                        id: "licence-\(vid)",
+                        id: "licence-\(vid)-\(expiry.timeIntervalSince1970)",
                         reg: cleanReg,
                         type: "Revenue Licence",
                         days: days,
@@ -1241,10 +1247,10 @@ struct ManagerHomeView: View {
             }
 
             if let expiry = vehicle.insuranceExpiry {
-                let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+                let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: expiry)).day ?? 0
                 if days <= 30 {
                     items.append(expiryNotificationItem(
-                        id: "insurance-\(vid)",
+                        id: "insurance-\(vid)-\(expiry.timeIntervalSince1970)",
                         reg: cleanReg,
                         type: "Insurance",
                         days: days,
@@ -1266,13 +1272,13 @@ struct ManagerHomeView: View {
                 let typeLC = type.lowercased()
                 guard typeLC != "insurance" && typeLC != "licence" else { continue }
 
-                let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+                let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: expiry)).day ?? 0
                 guard days <= 30 else { continue }
 
                 let reg = matchedVehicle.registration ?? "Vehicle"
-                let docId = doc.id?.uuidString ?? UUID().uuidString
+                let vid = matchedVehicle.id?.uuidString ?? UUID().uuidString
                 items.append(expiryNotificationItem(
-                    id: "doc-\(docId)",
+                    id: "doc-\(vid)-\(expiry.timeIntervalSince1970)",
                     reg: reg,
                     type: type.capitalized,
                     days: days,

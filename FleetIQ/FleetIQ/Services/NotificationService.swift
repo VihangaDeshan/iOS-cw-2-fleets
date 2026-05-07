@@ -1,9 +1,3 @@
-//
-//  NotificationService.swift
-//  FleetIQ
-//
-//  Created by GitHub Copilot on 2026-05-04.
-//
 
 import Foundation
 import UserNotifications
@@ -183,8 +177,9 @@ final class NotificationService {
     /// Fires an immediate "EXPIRED" push if the date is already past (at most once per day),
     /// or reschedules the standard 30/7/0-day calendar warnings for future dates.
     // Tracks which expiry warnings have fired during this specific app session.
+    // Maps the session key to the exact expiry date that fired it.
     // This resets when the app is fully closed and reopened.
-    private var firedSessionExpiries = Set<String>()
+    private var firedSessionExpiries: [String: Date] = [:]
     private var firedSessionFaults = Set<String>()
 
     func fireManagerFaultIfNeeded(
@@ -214,12 +209,14 @@ final class NotificationService {
             [.day], from: Calendar.current.startOfDay(for: Date()),
             to: Calendar.current.startOfDay(for: expiryDate)).day ?? Int.min
 
+        let sessionKey = "expiry-\(vehicleId.uuidString)-\(documentType)"
+
         if daysUntil <= 30 {
-            // Ensure this specific notification only fires ONCE per app session.
-            let sessionKey = "expiry-\(vehicleId.uuidString)-\(documentType)"
+            // Ensure this specific notification only fires ONCE per app session for a specific date.
+            let lastFiredDate = firedSessionExpiries[sessionKey]
             
-            if !firedSessionExpiries.contains(sessionKey) {
-                firedSessionExpiries.insert(sessionKey)
+            if lastFiredDate != expiryDate {
+                firedSessionExpiries[sessionKey] = expiryDate
                 
                 if daysUntil < 0 {
                     sendImmediate(
@@ -243,6 +240,10 @@ final class NotificationService {
                         identifier: sessionKey)
                 }
             }
+        } else {
+            // If the user updates the document to a healthy future date, clear the session lock.
+            // This allows the push notification to fire again if they set it back to an expired date for testing/demos.
+            firedSessionExpiries.removeValue(forKey: sessionKey)
         }
 
         // Reschedule standard background warnings.

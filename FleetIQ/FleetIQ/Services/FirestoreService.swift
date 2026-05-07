@@ -701,6 +701,32 @@ class FirestoreService {
         }
     }
 
+    /// Updates a driver document in fleets/{fleetId}/drivers/{driverId}.
+    /// - Parameters:
+    ///   - fleetId: Fleet document identifier.
+    ///   - driverId: Driver identifier.
+    ///   - data: Partial data to update.
+    func updateDriver(
+        fleetId: String,
+        driverId: String,
+        data: [String: Any]
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            db.collection("fleets")
+                .document(fleetId)
+                .collection("drivers")
+                .document(driverId)
+                .updateData(data) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: ())
+                }
+        }
+    }
+
     // MARK: - Fault Reports
 
     /// Saves a fault report document to fleets/{fleetId}/faultReports/{faultId}.

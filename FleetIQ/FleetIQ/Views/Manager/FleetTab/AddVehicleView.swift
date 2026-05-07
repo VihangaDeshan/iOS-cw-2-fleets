@@ -607,8 +607,13 @@ struct AddVehicleView: View {
             return
         }
 
-        // Upload any scanned documents into the Document Wallet.
-        await uploadScannedDocuments(for: vehicleId, registration: normalizedRegistration)
+        // Upload any scanned documents into the Document Wallet in the background
+        // This significantly speeds up the perceived save time since the user
+        // doesn't have to wait for the Firebase image uploads to finish.
+        Task {
+            await uploadScannedDocuments(for: vehicleId, registration: normalizedRegistration)
+        }
+        
         dismiss()
     }
 
