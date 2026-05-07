@@ -276,13 +276,33 @@ class FleetViewModel: ObservableObject {
     /// - Parameter vehicle: Vehicle record to evaluate.
     /// - Returns: "Active", "Due Soon", or "Overdue".
     func vehicleStatus(_ vehicle: VehicleEntity) -> String {
+        let now = Date()
+        let thirtyDaysFromNow = Calendar.current.date(byAdding: .day, value: 30, to: now) ?? now
+        
+        var isExpired = false
+        var isExpiringSoon = false
+        
+        if let insExp = vehicle.insuranceExpiry {
+            if insExp < now { isExpired = true }
+            else if insExp <= thirtyDaysFromNow { isExpiringSoon = true }
+        }
+        
+        if let licExp = vehicle.licenceExpiry {
+            if licExp < now { isExpired = true }
+            else if licExp <= thirtyDaysFromNow { isExpiringSoon = true }
+        }
+        
+        if isExpired {
+            return "Overdue"
+        }
+
         let days = daysUntilService(vehicle)
 
         if days < 0 {
             return "Overdue"
         }
 
-        if days <= 30 {
+        if days <= 30 || isExpiringSoon {
             return "Due Soon"
         }
 
@@ -367,6 +387,7 @@ class FleetViewModel: ObservableObject {
     var overdueCount: Int {
         vehicles.filter { vehicleStatus($0) == "Overdue" }.count
     }
+
 
     // MARK: - Cleanup
 

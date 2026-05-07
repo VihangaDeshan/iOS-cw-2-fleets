@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import Combine
 
 // MARK: - Manager Home View
 struct ManagerHomeView: View {
@@ -247,6 +248,11 @@ struct ManagerHomeView: View {
         }
         .frame(height: 210)
         .tabViewStyle(.page(indexDisplayMode: .automatic))
+        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
+            withAnimation {
+                heroPage = (heroPage + 1) % 3
+            }
+        }
     }
 
     // MARK: - Fleet Hero Card
@@ -281,7 +287,7 @@ struct ManagerHomeView: View {
             statusProgressBar
                 .padding(.top, 12)
 
-            HStack(spacing: 16) {
+            HStack(spacing: 8) {
                 legendItem(
                     colour: .statusActive,
                     label: "Active",
@@ -786,6 +792,62 @@ struct ManagerHomeView: View {
         .accessibilityHint(subtitle)
     }
 
+    // MARK: - Today's Activity Helper struct
+    struct UnifiedActivityItem: Identifiable {
+        let id: String
+        let icon: String
+        let iconColor: Color
+        let title: String
+        let detail: String
+        let time: Date
+    }
+
+    private var combinedTodayActivity: [UnifiedActivityItem] {
+        var items: [UnifiedActivityItem] = []
+        
+        for fault in todayFaultReports {
+            items.append(UnifiedActivityItem(
+                id: fault.id?.uuidString ?? UUID().uuidString,
+                icon: "exclamationmark.triangle.fill",
+                iconColor: .statusOverdue,
+                title: "Fault reported",
+                detail: fault.descriptionText ?? "Fault submitted",
+                time: fault.createdAt ?? Date()
+            ))
+        }
+        for record in todayServiceRecords {
+            items.append(UnifiedActivityItem(
+                id: record.id?.uuidString ?? UUID().uuidString,
+                icon: "wrench.and.screwdriver.fill",
+                iconColor: .navyPrimary,
+                title: record.serviceType ?? "Service logged",
+                detail: record.garageName ?? "Service record saved",
+                time: record.date ?? Date()
+            ))
+        }
+        for log in todayFuelLogs {
+            items.append(UnifiedActivityItem(
+                id: log.id?.uuidString ?? UUID().uuidString,
+                icon: "fuelpump.fill",
+                iconColor: .statusDueSoon,
+                title: "Fuel fill-up logged",
+                detail: String(format: "%.1f L · LKR %.0f", log.litres, log.totalCostLKR),
+                time: log.date ?? Date()
+            ))
+        }
+        for trip in todayTripLogs {
+            items.append(UnifiedActivityItem(
+                id: trip.id?.uuidString ?? UUID().uuidString,
+                icon: "road.lanes",
+                iconColor: .driverGreen,
+                title: trip.purpose?.isEmpty == false ? trip.purpose! : "Trip logged",
+                detail: String(format: "%.1f km · %@", trip.distanceKm, trip.destination ?? "-"),
+                time: trip.date ?? Date()
+            ))
+        }
+        return items.sorted { $0.time > $1.time }
+    }
+
     // MARK: - Today's Activity
     var todayActivitySection: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -803,10 +865,8 @@ struct ManagerHomeView: View {
             }
             .padding(.top, 14)
 
-            let totalToday = todayServiceRecords.count
-                + todayFuelLogs.count
-                + todayFaultReports.count
-                + todayTripLogs.count
+            let unifiedActivities = combinedTodayActivity
+            let totalToday = unifiedActivities.count
 
             if totalToday == 0 {
                 HStack(spacing: 8) {
@@ -823,48 +883,19 @@ struct ManagerHomeView: View {
                 .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(todayFaultReports.prefix(2)), id: \.id) { fault in
+                    let top5 = Array(unifiedActivities.prefix(5))
+                    ForEach(top5.indices, id: \.self) { index in
+                        let item = top5[index]
                         activityRow(
-                            icon: "exclamationmark.triangle.fill",
-                            iconColor: .statusOverdue,
-                            title: "Fault reported",
-                            detail: fault.descriptionText ?? "Fault submitted",
-                            time: fault.createdAt
+                            icon: item.icon,
+                            iconColor: item.iconColor,
+                            title: item.title,
+                            detail: item.detail,
+                            time: item.time
                         )
-                        Divider().padding(.leading, 46)
-                    }
-                    ForEach(Array(todayServiceRecords.prefix(2)), id: \.id) { record in
-                        activityRow(
-                            icon: "wrench.and.screwdriver.fill",
-                            iconColor: .navyPrimary,
-                            title: record.serviceType ?? "Service logged",
-                            detail: record.garageName ?? "Service record saved",
-                            time: record.date
-                        )
-                        Divider().padding(.leading, 46)
-                    }
-                    ForEach(Array(todayFuelLogs.prefix(2)), id: \.id) { log in
-                        activityRow(
-                            icon: "fuelpump.fill",
-                            iconColor: .statusDueSoon,
-                            title: "Fuel fill-up logged",
-                            detail: String(format: "%.1f L · LKR %.0f",
-                                          log.litres, log.totalCostLKR),
-                            time: log.date
-                        )
-                        Divider().padding(.leading, 46)
-                    }
-                    ForEach(Array(todayTripLogs.prefix(2)), id: \.id) { trip in
-                        activityRow(
-                            icon: "road.lanes",
-                            iconColor: .driverGreen,
-                            title: trip.purpose?.isEmpty == false
-                                ? trip.purpose! : "Trip logged",
-                            detail: String(format: "%.1f km · %@",
-                                          trip.distanceKm,
-                                          trip.destination ?? "-"),
-                            time: trip.date
-                        )
+                        if index < top5.count - 1 {
+                            Divider().padding(.leading, 46)
+                        }
                     }
                 }
                 .background(Color.white)
