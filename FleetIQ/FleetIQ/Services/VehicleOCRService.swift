@@ -121,7 +121,9 @@ final class VehicleOCRService {
 
     // MARK: - Parsing Helpers
 
-    /// Finds the most likely Sri Lankan vehicle registration from OCR lines.
+    /// Finds the most likely vehicle registration from OCR lines.
+    /// Tries label-based extraction first ("Registration Number: WP KA-5050"),
+    /// then falls back to pattern scanning across all lines.
     /// - Parameter lines: OCR text lines.
     /// - Returns: Normalized uppercase registration if found.
     private func registrationFromLines(_ lines: [String]) -> String? {
@@ -130,17 +132,33 @@ final class VehicleOCRService {
             #"\b[A-Z]{2,3}[\s-]?\d{4}\b"#
         ]
 
-        for line in lines {
-            let upper = line.uppercased()
-
+        func matchAndClean(_ text: String) -> String? {
+            let upper = text.uppercased()
             for pattern in patterns {
                 if let range = upper.range(of: pattern, options: .regularExpression) {
-                    let cleaned = String(upper[range])
+                    return String(upper[range])
                         .replacingOccurrences(of: "-", with: " ")
                         .replacingOccurrences(of: "  ", with: " ")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
-                    return cleaned
                 }
+            }
+            return nil
+        }
+
+        // Label-based extraction first — handles "Registration Number: WP KA-5050"
+        // and split-line layouts where the value is on the next line.
+        let regLabels = ["registration number", "registration no", "reg no", "plate number", "plate no"]
+        for (i, _) in lines.enumerated() {
+            if let labeled = extractLabeledValue(from: lines, at: i, labels: regLabels),
+               let result = matchAndClean(labeled) {
+                return result
+            }
+        }
+
+        // Pattern-based fallback — scans every line for a plate-like token.
+        for line in lines {
+            if let result = matchAndClean(line) {
+                return result
             }
         }
 
@@ -148,6 +166,8 @@ final class VehicleOCRService {
     }
 
     /// Detects make and model from OCR text using known vehicle make names.
+    /// Uses indexed iteration so label-only lines (e.g. "Model:") can pull the
+    /// value from the following line — common in Philippines-style table layouts.
     /// - Parameter lines: OCR text lines.
     /// - Returns: Tuple containing optional make and model.
     private func makeAndModelFromLines(_ lines: [String]) -> (make: String?, model: String?) {
@@ -159,42 +179,40 @@ final class VehicleOCRService {
         var extractedMake: String?
         var extractedModel: String?
 
-        for line in lines {
-            if extractedMake == nil, let labeledMake = valueAfterLabel(in: line, labels: ["make", "manufacturer", "brand"]) {
+        for (i, line) in lines.enumerated() {
+            // 1. Combined label first — prevents "make" partially matching "Make/Model:"
+            if let makeAndModel = extractLabeledValue(from: lines, at: i, labels: ["make & model", "make and model", "make/model"]) {
+                let parsed = parseMakeAndModel(from: makeAndModel, knownMakes: knownMakes)
+                if extractedMake == nil { extractedMake = parsed.make }
+                if extractedModel == nil { extractedModel = parsed.model }
+            }
+
+            // 2. Individual "make" — start-of-line match avoids "Make/Model:" false hit
+            if extractedMake == nil,
+               let labeledMake = extractLabeledValue(from: lines, at: i, labels: ["make", "manufacturer", "brand"]) {
                 let parsed = parseMakeAndModel(from: labeledMake, knownMakes: knownMakes)
                 extractedMake = parsed.make ?? labeledMake
-                if extractedModel == nil {
-                    extractedModel = parsed.model
+                if extractedModel == nil { extractedModel = parsed.model }
+            }
+
+            // 3. Individual "model" — skip lines starting with "year" so "Year Model: 2021"
+            //    (Philippines format) never pollutes the model field with a year value.
+            if extractedModel == nil {
+                let lower = line.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                if !lower.hasPrefix("year"),
+                   let labeledModel = extractLabeledValue(from: lines, at: i, labels: ["model", "model no", "model number", "vehicle model"]) {
+                    extractedModel = labeledModel
                 }
             }
 
-            if extractedModel == nil, let labeledModel = valueAfterLabel(in: line, labels: ["model", "model no", "model number", "vehicle model"]) {
-                extractedModel = labeledModel
-            }
-
-            if let makeAndModel = valueAfterLabel(in: line, labels: ["make & model", "make and model", "make/model"]) {
-                let parsed = parseMakeAndModel(from: makeAndModel, knownMakes: knownMakes)
-                if extractedMake == nil {
-                    extractedMake = parsed.make
-                }
-                if extractedModel == nil {
-                    extractedModel = parsed.model
-                }
-            }
-
+            // 4. Fallback: scan line for a known make name
             for make in knownMakes {
                 if line.localizedCaseInsensitiveContains(make) {
                     let trimmed = line.trimmingCharacters(in: .whitespaces)
                     let makeRange = trimmed.range(of: make, options: .caseInsensitive)
                     let modelPart = makeRange.map { String(trimmed[$0.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
-
-                    if extractedMake == nil {
-                        extractedMake = make
-                    }
-
-                    if extractedModel == nil, !modelPart.isEmpty {
-                        extractedModel = modelPart
-                    }
+                    if extractedMake == nil { extractedMake = make }
+                    if extractedModel == nil, !modelPart.isEmpty { extractedModel = modelPart }
                 }
             }
         }
@@ -205,25 +223,55 @@ final class VehicleOCRService {
         )
     }
 
-    /// Extracts text value after a recognized label pattern.
-    /// - Parameters:
-    ///   - line: OCR text line.
-    ///   - labels: Candidate labels to match.
-    /// - Returns: Extracted value when a label is found.
-    private func valueAfterLabel(in line: String, labels: [String]) -> String? {
-        let lower = line.lowercased()
+    /// Matches a label at the start of a line and returns the value that follows it.
+    /// Longest label is tried first to prevent "model" from matching "model no" lines.
+    /// The character after the label must be a separator (`:`, space, or end-of-line) so
+    /// "make" does not partially match "Make/Model:" and "model" does not match "Year Model:".
+    private func labeledValueAtStart(in line: String, labels: [String]) -> String? {
+        let lower = line.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let sortedLabels = labels.sorted { $0.count > $1.count }
 
-        for label in labels {
-            if let range = lower.range(of: label) {
-                let suffix = line[range.upperBound...]
-                let cleaned = suffix
-                    .replacingOccurrences(of: ":", with: "")
-                    .replacingOccurrences(of: "-", with: " ")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+        for label in sortedLabels {
+            guard lower.hasPrefix(label) else { continue }
 
-                if !cleaned.isEmpty {
-                    return cleaned
-                }
+            let afterLabel = lower.dropFirst(label.count)
+            let firstChar = afterLabel.first
+            guard firstChar == nil || firstChar == ":" || firstChar == " " || firstChar == "\t" else { continue }
+
+            let suffix = line.dropFirst(label.count)
+            let cleaned = suffix
+                .replacingOccurrences(of: ":", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if !cleaned.isEmpty { return String(cleaned) }
+        }
+
+        return nil
+    }
+
+    /// Returns the value for a labeled field, checking the same line first,
+    /// then the next line when the current line contains only the label (e.g. "Model:").
+    /// This handles table layouts where OCR splits label and value across two lines.
+    private func extractLabeledValue(from lines: [String], at index: Int, labels: [String]) -> String? {
+        let line = lines[index]
+
+        if let value = labeledValueAtStart(in: line, labels: labels) {
+            return value
+        }
+
+        // Check if line is label-only (value may be on the next line)
+        let lower = line.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let sortedLabels = labels.sorted { $0.count > $1.count }
+        for label in sortedLabels {
+            guard lower.hasPrefix(label) else { continue }
+            let afterLabel = lower.dropFirst(label.count)
+            let firstChar = afterLabel.first
+            guard firstChar == nil || firstChar == ":" || firstChar == " " || firstChar == "\t" else { continue }
+            let remaining = String(afterLabel).replacingOccurrences(of: ":", with: "").trimmingCharacters(in: .whitespaces)
+            guard remaining.isEmpty else { continue }
+            if index + 1 < lines.count {
+                let next = lines[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !next.isEmpty { return next }
             }
         }
 
@@ -250,24 +298,35 @@ final class VehicleOCRService {
         return (make: nil, model: cleaned.isEmpty ? nil : cleaned)
     }
 
-    /// Detects a likely vehicle year from OCR text.
+    /// Detects the vehicle manufacture/model year from OCR text.
+    /// Tries labeled fields first ("Year Model:", "Year of Manufacture:") so that
+    /// garbled footer text or OCR-corrected strings with a different year-like number
+    /// cannot shadow the clearly labeled year field.
     /// - Parameter lines: OCR text lines.
     /// - Returns: Year between 1980 and current year + 1.
     private func yearFromLines(_ lines: [String]) -> Int16? {
         let currentYear = Calendar.current.component(.year, from: Date()) + 1
+        let yearPattern = #"\b(19\d{2}|20\d{2})\b"#
 
+        func extractYear(from text: String) -> Int16? {
+            guard let range = text.range(of: yearPattern, options: .regularExpression),
+                  let value = Int(text[range]),
+                  (1980...currentYear).contains(value) else { return nil }
+            return Int16(value)
+        }
+
+        // Label-based extraction first — "Year Model: 2018" must win over any stray year elsewhere
+        let yearLabels = ["year model", "year of manufacture", "manufacture year", "model year", "year"]
+        for (i, _) in lines.enumerated() {
+            if let labeled = extractLabeledValue(from: lines, at: i, labels: yearLabels),
+               let year = extractYear(from: labeled) {
+                return year
+            }
+        }
+
+        // Pattern-based fallback — scan all lines for the first plausible year
         for line in lines {
-            let pattern = #"\b(19\d{2}|20\d{2})\b"#
-            guard let range = line.range(of: pattern, options: .regularExpression) else {
-                continue
-            }
-
-            let text = String(line[range])
-            guard let yearValue = Int(text), (1980...currentYear).contains(yearValue) else {
-                continue
-            }
-
-            return Int16(yearValue)
+            if let year = extractYear(from: line) { return year }
         }
 
         return nil

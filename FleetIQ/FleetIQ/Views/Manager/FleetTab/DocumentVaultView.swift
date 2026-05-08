@@ -19,7 +19,25 @@ struct DocumentVaultView: View {
     @Environment(\.managedObjectContext) private var context
     @EnvironmentObject private var authViewModel: AuthViewModel
 
-    @State private var documentsByType: [String: DocumentEntity] = [:]
+    // Live Core Data observer — auto-refreshes when uploadScannedDocuments saves
+    // the emission DocumentEntity in the background after vehicle creation.
+    @FetchRequest private var fetchedDocuments: FetchedResults<DocumentEntity>
+
+    private var documentsByType: [String: DocumentEntity] {
+        Dictionary(uniqueKeysWithValues: fetchedDocuments.compactMap { doc in
+            guard let type = doc.type else { return nil }
+            return (type.lowercased(), doc)
+        })
+    }
+
+    init(vehicle: VehicleEntity) {
+        self.vehicle = vehicle
+        _fetchedDocuments = FetchRequest(
+            sortDescriptors: [NSSortDescriptor(keyPath: \DocumentEntity.type, ascending: true)],
+            predicate: NSPredicate(format: "vehicleId == %@", vehicle.id! as CVarArg),
+            animation: .default
+        )
+    }
 
     @State private var activeDocType: String?
     @State private var showPhotosPicker = false
@@ -86,8 +104,10 @@ struct DocumentVaultView: View {
                 }
             }
             .onAppear {
-                loadDocuments()
                 syncFromFirestore()
+            }
+            .onChange(of: fetchedDocuments.count) { _, _ in
+                checkExpiredDocuments()
             }
             .alert("Expired Documents", isPresented: $showExpiredAlert) {
                 Button("OK", role: .cancel) { }
@@ -335,7 +355,6 @@ struct DocumentVaultView: View {
             )
 
             infoMessage = "\(docType.capitalized) document saved successfully."
-            loadDocuments()
         } catch {
             infoMessage = "Failed to save document: \(error.localizedDescription)"
         }
@@ -394,7 +413,6 @@ struct DocumentVaultView: View {
             try context.save()
 
             infoMessage = "Document removed."
-            loadDocuments()
         } catch {
             infoMessage = "Failed to remove document: \(error.localizedDescription)"
         }
@@ -450,58 +468,41 @@ struct DocumentVaultView: View {
                 }
 
                 try context.save()
-                loadDocuments()
             } catch {
                 infoMessage = "Sync failed: \(error.localizedDescription)"
             }
         }
     }
 
-    private func loadDocuments() {
-        guard let vehicleId = vehicle.id else {
-            documentsByType = [:]
-            return
-        }
+    private func checkExpiredDocuments() {
+        guard let vehicleId = vehicle.id else { return }
+        let reg = vehicle.registration ?? "Vehicle"
+        var expired: [String] = []
 
-        let request = DocumentEntity.fetchRequest()
-        request.predicate = NSPredicate(format: "vehicleId == %@", vehicleId as CVarArg)
+        for doc in fetchedDocuments {
+            guard let type = doc.type else { continue }
 
-        do {
-            let docs = try context.fetch(request)
-            var map: [String: DocumentEntity] = [:]
-            var expired: [String] = []
-            let reg = vehicle.registration ?? "Vehicle"
+            if let expiry = doc.expiryDate {
+                NotificationService.shared.rescheduleExpiryIfNeeded(
+                    vehicleRegistration: reg,
+                    documentType: type.capitalized,
+                    expiryDate: expiry,
+                    vehicleId: vehicleId)
 
-            for doc in docs {
-                guard let type = doc.type else { continue }
-                map[type.lowercased()] = doc
-
-                if let expiry = doc.expiryDate {
-                    NotificationService.shared.rescheduleExpiryIfNeeded(
-                        vehicleRegistration: reg,
-                        documentType: type.capitalized,
-                        expiryDate: expiry,
-                        vehicleId: vehicleId)
-
-                    let days = Calendar.current.dateComponents(
-                        [.day],
-                        from: Calendar.current.startOfDay(for: Date()),
-                        to: Calendar.current.startOfDay(for: expiry)).day ?? 0
-                    if days < 0 {
-                        expired.append(type.capitalized)
-                    }
+                let days = Calendar.current.dateComponents(
+                    [.day],
+                    from: Calendar.current.startOfDay(for: Date()),
+                    to: Calendar.current.startOfDay(for: expiry)).day ?? 0
+                if days < 0 {
+                    expired.append(type.capitalized)
                 }
             }
+        }
 
-            documentsByType = map
-
-            if !expired.isEmpty && !hasShownExpiredAlert {
-                hasShownExpiredAlert = true
-                expiredDocumentNames = expired
-                showExpiredAlert = true
-            }
-        } catch {
-            documentsByType = [:]
+        if !expired.isEmpty && !hasShownExpiredAlert {
+            hasShownExpiredAlert = true
+            expiredDocumentNames = expired
+            showExpiredAlert = true
         }
     }
 
