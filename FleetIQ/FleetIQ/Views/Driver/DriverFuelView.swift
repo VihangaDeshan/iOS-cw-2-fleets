@@ -21,23 +21,19 @@ struct DriverFuelView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView("Loading Fuel Logs...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let assignedVehicle {
-                    FuelLogView(vehicle: assignedVehicle)
-                } else {
-                    ContentUnavailableView(
-                        "No Vehicle Assigned",
-                        systemImage: "fuelpump",
-                        description: Text("Ask your manager to assign a vehicle to start fuel logging.")
-                    )
-                }
+        Group {
+            if isLoading {
+                ProgressView("Loading Fuel Logs...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let assignedVehicle {
+                FuelLogView(vehicle: assignedVehicle)
+            } else {
+                ContentUnavailableView(
+                    "No Vehicle Assigned",
+                    systemImage: "fuelpump",
+                    description: Text("Ask your manager to assign a vehicle to start fuel logging.")
+                )
             }
-            .navigationTitle("Fuel")
-            .navigationBarTitleDisplayMode(.inline)
         }
         .task(id: normalizedVehicleId) {
             loadAssignedVehicle()

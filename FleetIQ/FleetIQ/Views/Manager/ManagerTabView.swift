@@ -51,6 +51,7 @@ struct ManagerTabView: View {
         .accentColor(.navyPrimary)
         .environmentObject(fleetViewModel)
         .onAppear {
+            applyGlassTabBarAppearance()
             startVehicleSyncIfPossible()
             startFaultSyncIfPossible()
         }
@@ -85,6 +86,19 @@ struct ManagerTabView: View {
         }
 
         faultViewModel.startFaultListener(fleetId: normalizedFleetId)
+    }
+
+    // MARK: - Glass Tab Bar
+    /// Applies a frosted-glass (ultraThinMaterial) appearance to the system tab bar,
+    /// following iOS Human Interface Guidelines for translucent navigation surfaces.
+    private func applyGlassTabBarAppearance() {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithDefaultBackground()
+        appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+        appearance.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.55)
+        appearance.shadowColor = UIColor.separator.withAlphaComponent(0.35)
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
     }
 }
 

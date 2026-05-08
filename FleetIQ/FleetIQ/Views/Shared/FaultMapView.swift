@@ -120,9 +120,14 @@ struct FaultMapView: View {
                         Spacer()
 
                         Button {
-                            let item = MKMapItem(placemark: MKPlacemark(coordinate: garage.coordinate))
-                            item.name = garage.displayName
-                            item.openInMaps()
+                            let source = MKMapItem(placemark: MKPlacemark(coordinate: driverCoordinate))
+                            source.name = "Driver Location"
+                            let destination = MKMapItem(placemark: MKPlacemark(coordinate: garage.coordinate))
+                            destination.name = garage.displayName
+                            MKMapItem.openMaps(
+                                with: [source, destination],
+                                launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving]
+                            )
                         } label: {
                             Text("Directions")
                                 .font(.subheadline.weight(.semibold))
@@ -145,8 +150,8 @@ struct FaultMapView: View {
             }
         }
         .padding(14)
-        .background(Color.white)
-        .cornerRadius(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
     }
 }

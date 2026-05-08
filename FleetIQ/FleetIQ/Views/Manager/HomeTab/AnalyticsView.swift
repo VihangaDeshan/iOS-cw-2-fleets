@@ -85,7 +85,7 @@ struct AnalyticsView: View {
                 endPoint: .bottomTrailing
             )
         )
-        .cornerRadius(20)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private var monthNavigationCard: some View {
@@ -118,8 +118,8 @@ struct AnalyticsView: View {
             .accessibilityHint("Moves analytics forward one month")
         }
         .padding(14)
-        .background(Color.white)
-        .cornerRadius(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
     }
 
@@ -191,8 +191,8 @@ struct AnalyticsView: View {
                 .foregroundColor(.secondary)
         }
         .padding(14)
-        .background(Color.white)
-        .cornerRadius(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
     }
 
@@ -244,8 +244,8 @@ struct AnalyticsView: View {
                 .foregroundColor(.secondary)
         }
         .padding(14)
-        .background(Color.white)
-        .cornerRadius(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
     }
 
@@ -294,18 +294,24 @@ struct AnalyticsView: View {
                 endPoint: .bottomTrailing
             )
         )
-        .cornerRadius(20)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private var alertsCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("→  \(openFaultCount) VEHICLE FAULT")
-                .font(.title2.weight(.bold))
-                .foregroundColor(.white)
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                Text("\(openFaultCount) VEHICLE FAULT")
+            }
+            .font(.title2.weight(.bold))
+            .foregroundColor(.white)
 
-            Text("→  \(expiringInsuranceCount) INSURANCE WILL EXPIRE SOON")
-                .font(.title2.weight(.bold))
-                .foregroundColor(.white)
+            HStack(spacing: 8) {
+                Image(systemName: "shield.slash.fill")
+                Text("\(expiringInsuranceCount) INSURANCE WILL EXPIRE SOON")
+            }
+            .font(.title2.weight(.bold))
+            .foregroundColor(.white)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
@@ -316,7 +322,7 @@ struct AnalyticsView: View {
                 endPoint: .trailing
             )
         )
-        .cornerRadius(20)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private func dotLegend(color: Color, text: String) -> some View {
@@ -368,8 +374,8 @@ struct AnalyticsView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(10)
-        .background(Color.white)
-        .cornerRadius(10)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .shadow(color: .black.opacity(0.07), radius: 3)
     }
 
@@ -385,19 +391,17 @@ struct AnalyticsView: View {
             let currentMonth = calendar.component(.month, from: Date())
             let currentYear = calendar.component(.year, from: Date())
 
-            let monthlyService = serviceRecords.filter {
+            _ = serviceRecords.filter {
                 guard let date = $0.date else { return false }
                 return calendar.component(.month, from: date) == currentMonth &&
                     calendar.component(.year, from: date) == currentYear
             }
-            .reduce(0) { $0 + $1.costLKR }
 
-            let monthlyFuel = fuelLogs.filter {
+            _ = fuelLogs.filter {
                 guard let date = $0.date else { return false }
                 return calendar.component(.month, from: date) == currentMonth &&
                     calendar.component(.year, from: date) == currentYear
             }
-            .reduce(0) { $0 + $1.totalCostLKR }
 
             let validEfficiencies = fuelLogs.filter { $0.kmPerLitre > 0 }
             averageEfficiency = validEfficiencies.isEmpty

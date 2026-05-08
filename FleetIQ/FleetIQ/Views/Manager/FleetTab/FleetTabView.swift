@@ -51,12 +51,15 @@ struct FleetTabView: View {
                     HStack {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary)
+                            .font(.subheadline)
 
                         TextField("Search vehicles…", text: $searchText)
+                            .font(.subheadline)
                     }
-                    .padding(9)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
                     .background(Color(.systemGray6))
-                    .cornerRadius(10)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
                     .accessibilityLabel("Search vehicles by registration, make or model")
@@ -188,10 +191,10 @@ struct FilterPill: View {
     var body: some View {
         Button(action: action) {
             Text(count > 0 ? "\(title) \(count)" : title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundColor(isSelected ? .white : Color.primary)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 5)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
                 .background(isSelected ? Color.navyPrimary : Color(.systemGray5))
                 .clipShape(Capsule())
         }

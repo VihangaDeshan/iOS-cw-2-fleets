@@ -3,9 +3,22 @@ import Foundation
 import UserNotifications
 import UIKit
 
+// MARK: - Notification Preference Keys
+// Mirrors the @AppStorage keys used in ManagerSettingsView / DriverSettingsView.
+// UserDefaults returns false when a key has never been set, so we default to true
+// by using `object(forKey:) as? Bool ?? true`.
+private extension UserDefaults {
+    var notifyServiceDue:     Bool { object(forKey: "notifyServiceDue")     as? Bool ?? true }
+    var notifyExpiryWarnings: Bool { object(forKey: "notifyExpiryWarnings") as? Bool ?? true }
+    var notifyCriticalFaults: Bool { object(forKey: "notifyCriticalFaults") as? Bool ?? true }
+    // Driver preference — guards fault-status-update pushes sent to drivers.
+    var notifyFaultUpdates:   Bool { object(forKey: "notifyFaultUpdates")   as? Bool ?? true }
+}
+
+// MARK: - Notification Service
 final class NotificationService {
     static let shared = NotificationService()
-    
+
     private init() {
         NotificationCenter.default.addObserver(
             self,
@@ -45,6 +58,7 @@ final class NotificationService {
         predictedDate: Date,
         vehicleId: UUID
     ) {
+        guard UserDefaults.standard.notifyServiceDue else { return }
         let identifier = "service-\(vehicleId.uuidString)"
         let content = UNMutableNotificationContent()
         content.title = "Service Due Soon"
@@ -86,6 +100,7 @@ final class NotificationService {
         vehicleId: UUID,
         daysBefore: Int
     ) {
+        guard UserDefaults.standard.notifyExpiryWarnings else { return }
         let identifier =
             "expiry-\(vehicleId.uuidString)-\(documentType)-\(daysBefore)"
         let content = UNMutableNotificationContent()
@@ -188,6 +203,7 @@ final class NotificationService {
         urgency: String,
         faultId: UUID
     ) {
+        guard UserDefaults.standard.notifyCriticalFaults else { return }
         let sessionKey = "fault-\(faultId.uuidString)"
         if !firedSessionFaults.contains(sessionKey) {
             firedSessionFaults.insert(sessionKey)
@@ -205,6 +221,7 @@ final class NotificationService {
         expiryDate: Date,
         vehicleId: UUID
     ) {
+        guard UserDefaults.standard.notifyExpiryWarnings else { return }
         let daysUntil = Calendar.current.dateComponents(
             [.day], from: Calendar.current.startOfDay(for: Date()),
             to: Calendar.current.startOfDay(for: expiryDate)).day ?? Int.min
@@ -300,6 +317,7 @@ final class NotificationService {
         description: String,
         faultId: UUID
     ) {
+        guard UserDefaults.standard.notifyFaultUpdates else { return }
         let snippet = description.isEmpty
             ? "your fault report"
             : String(description.prefix(50))

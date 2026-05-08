@@ -23,70 +23,197 @@ struct UserProfileView: View {
     @State private var initialName = ""
     @State private var initialPhone = ""
 
-    @State private var isEditing = false
     @State private var isSaving = false
     @State private var isLoading = false
-
     @State private var showAlert = false
     @State private var alertMessage = ""
 
     private var initials: String {
         let parts = fullName.split(separator: " ")
-
         if parts.count >= 2 {
             return String(parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
         }
-
         if let first = parts.first {
             return String(first.prefix(2)).uppercased()
         }
-
-        return "US"
+        return "MG"
     }
 
     private var hasUnsavedChanges: Bool {
-        fullName.trimmingCharacters(in: .whitespacesAndNewlines) != initialName.trimmingCharacters(in: .whitespacesAndNewlines)
-            || phone.trimmingCharacters(in: .whitespacesAndNewlines) != initialPhone.trimmingCharacters(in: .whitespacesAndNewlines)
+        fullName.trimmingCharacters(in: .whitespacesAndNewlines) != initialName ||
+        phone.trimmingCharacters(in: .whitespacesAndNewlines) != initialPhone
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                avatarSection
+        List {
+            // MARK: - Avatar Header
+            Section {
+                HStack {
+                    Spacer()
+                    VStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.navyPrimary, Color.navySecondary],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 80, height: 80)
+                                .shadow(color: Color.navyPrimary.opacity(0.3), radius: 10, x: 0, y: 5)
 
-                profileCard
+                            if isLoading {
+                                ProgressView().tint(.white)
+                            } else {
+                                Text(initials)
+                                    .font(.title2.weight(.bold))
+                                    .foregroundStyle(.white)
+                            }
+                        }
 
-                securityCard
+                        VStack(spacing: 3) {
+                            Text(fullName.isEmpty ? "Manager" : fullName)
+                                .font(.title3.weight(.bold))
 
-                logoutButton
-                    .padding(.top, 8)
+                            Text(email.isEmpty ? authViewModel.userRole.capitalized : email)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 12)
+                .listRowBackground(Color(.systemGroupedBackground))
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 20)
-            .padding(.bottom, 32)
+
+            // MARK: - Personal Info
+            Section {
+                // Name — editable
+                HStack {
+                    Label {
+                        Text("Full Name")
+                    } icon: {
+                        Image(systemName: "person.fill")
+                            .foregroundStyle(Color.navyPrimary)
+                    }
+                    Spacer()
+                    TextField("Full Name", text: $fullName)
+                        .multilineTextAlignment(.trailing)
+                        .foregroundStyle(.secondary)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                }
+
+                // Phone — editable
+                HStack {
+                    Label {
+                        Text("Phone")
+                    } icon: {
+                        Image(systemName: "phone.fill")
+                            .foregroundStyle(Color.statusActive)
+                    }
+                    Spacer()
+                    TextField("Phone", text: $phone)
+                        .multilineTextAlignment(.trailing)
+                        .foregroundStyle(.secondary)
+                        .keyboardType(.phonePad)
+                }
+
+                // Fleet Name — read only
+                HStack {
+                    Label {
+                        Text("Fleet Name")
+                    } icon: {
+                        Image(systemName: "building.2.fill")
+                            .foregroundStyle(Color(hex: "5856D6"))
+                    }
+                    Spacer()
+                    Text(fleetName.isEmpty ? "—" : fleetName)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Email — read only
+                HStack {
+                    Label {
+                        Text("Email")
+                    } icon: {
+                        Image(systemName: "envelope.fill")
+                            .foregroundStyle(Color.statusDueSoon)
+                    }
+                    Spacer()
+                    Text(email.isEmpty ? "—" : email)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            } header: {
+                Text("Personal Info")
+            } footer: {
+                Text("Full name and phone number can be edited. Email and fleet name are read-only.")
+            }
+
+            // MARK: - Security
+            Section("Security") {
+                NavigationLink(destination: ChangePasswordView()) {
+                    Label {
+                        Text("Change Password")
+                    } icon: {
+                        Image(systemName: "lock.fill")
+                            .foregroundStyle(.blue)
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(hex: "34C759").opacity(0.15))
+                            .frame(width: 32, height: 32)
+                        Image(systemName: "faceid")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color(hex: "34C759"))
+                    }
+
+                    Toggle("Face ID Lock", isOn: $faceIDEnabled)
+                }
+            }
+
+            // MARK: - Sign Out
+            Section {
+                Button(role: .destructive) {
+                    authViewModel.signOut()
+                    dismiss()
+                } label: {
+                    HStack {
+                        Spacer()
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                            .fontWeight(.semibold)
+                        Spacer()
+                    }
+                }
+            }
         }
-        .background(Color.systemGroupedBg.ignoresSafeArea())
+        .listStyle(.insetGrouped)
         .navigationTitle("Edit Profile")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button("Cancel") {
-                    dismiss()
-                }
+                Button("Cancel") { dismiss() }
             }
 
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Save") {
-                    Task {
-                        await saveProfile()
+                if isSaving {
+                    ProgressView()
+                } else {
+                    Button("Save") {
+                        Task { await saveProfile() }
                     }
+                    .fontWeight(.semibold)
+                    .disabled(!hasUnsavedChanges || isSaving)
                 }
-                .disabled(!isEditing || !hasUnsavedChanges || isSaving)
             }
         }
-        .task {
-            await loadProfile()
-        }
+        .task { await loadProfile() }
         .alert("Profile", isPresented: $showAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -94,156 +221,28 @@ struct UserProfileView: View {
         }
     }
 
-    private var avatarSection: some View {
-        VStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(Color.blue)
-                    .frame(width: 138, height: 138)
-
-                if isLoading {
-                    ProgressView()
-                        .tint(.white)
-                        .scaleEffect(1.1)
-                } else {
-                    Text(initials)
-                        .font(.system(size: 50, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-            }
-
-            Button("Edit") {
-                isEditing = true
-            }
-            .font(.system(size: 22, weight: .semibold))
-            .foregroundStyle(.blue)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var profileCard: some View {
-        VStack(spacing: 0) {
-            profileFieldRow(label: "FULL NAME", text: $fullName, editable: true)
-            Divider()
-            profileFieldRow(label: "FLEET NAME", text: $fleetName, editable: false)
-            Divider()
-            profileFieldRow(label: "EMAIL", text: $email, editable: false)
-            Divider()
-            profileFieldRow(label: "PHONE", text: $phone, editable: true)
-        }
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.black.opacity(0.04), lineWidth: 1)
-        )
-    }
-
-    private var securityCard: some View {
-        VStack(spacing: 0) {
-            Button {
-                Task {
-                    await sendPasswordReset()
-                }
-            } label: {
-                HStack {
-                    Text("Change Password")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(.primary)
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(Color.gray.opacity(0.6))
-                }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 22)
-            }
-
-            Divider()
-
-            HStack {
-                Text("Two-Factor Authentication")
-                    .font(.system(size: 20, weight: .medium))
-
-                Spacer()
-
-                Toggle("", isOn: $faceIDEnabled)
-                    .labelsHidden()
-                    .tint(.blue)
-            }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 20)
-        }
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.black.opacity(0.04), lineWidth: 1)
-        )
-    }
-
-    private var logoutButton: some View {
-        Button(role: .destructive) {
-            authViewModel.signOut()
-            dismiss()
-        } label: {
-            Text("Log Out")
-                .font(.system(size: 18, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(.red)
-    }
-
-    @ViewBuilder
-    private func profileFieldRow(label: String, text: Binding<String>, editable: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(label)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Color(hex: "6F7787"))
-
-            if editable && isEditing {
-                TextField("", text: text)
-                    .font(.system(size: 20, weight: .medium))
-                    .textInputAutocapitalization(.words)
-                    .disableAutocorrection(true)
-            } else {
-                Text(text.wrappedValue.isEmpty ? "-" : text.wrappedValue)
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(.primary)
-            }
-        }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 18)
-    }
+    // MARK: - Data
 
     private func loadProfile() async {
-        guard !authViewModel.currentUID.isEmpty else {
-            return
-        }
-
+        guard !authViewModel.currentUID.isEmpty else { return }
         isLoading = true
         defer { isLoading = false }
 
         do {
-            let uid = authViewModel.currentUID
-            let doc = try await Firestore.firestore().collection("users").document(uid).getDocument()
+            let doc = try await Firestore.firestore()
+                .collection("users")
+                .document(authViewModel.currentUID)
+                .getDocument()
             let data = doc.data() ?? [:]
 
-            let resolvedName = data["name"] as? String ?? ""
-            let resolvedEmail = data["email"] as? String ?? Auth.auth().currentUser?.email ?? ""
-            let resolvedPhone = data["phone"] as? String ?? ""
+            fullName = data["name"] as? String ?? ""
+            email = data["email"] as? String ?? Auth.auth().currentUser?.email ?? ""
+            phone = data["phone"] as? String ?? ""
             let resolvedFleet = data["fleetName"] as? String ?? authViewModel.fleetId
-
-            fullName = resolvedName
-            email = resolvedEmail
-            phone = resolvedPhone
             fleetName = resolvedFleet.isEmpty ? authViewModel.fleetId : resolvedFleet
 
-            initialName = fullName
-            initialPhone = phone
+            initialName = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+            initialPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
             alertMessage = error.localizedDescription
             showAlert = true
@@ -270,17 +269,19 @@ struct UserProfileView: View {
         defer { isSaving = false }
 
         do {
-            try await Firestore.firestore().collection("users").document(authViewModel.currentUID).setData([
-                "name": trimmedName,
-                "phone": trimmedPhone,
-                "updatedAt": Timestamp(date: Date())
-            ], merge: true)
+            try await Firestore.firestore()
+                .collection("users")
+                .document(authViewModel.currentUID)
+                .setData([
+                    "name": trimmedName,
+                    "phone": trimmedPhone,
+                    "updatedAt": Timestamp(date: Date())
+                ], merge: true)
 
             fullName = trimmedName
             phone = trimmedPhone
             initialName = trimmedName
             initialPhone = trimmedPhone
-            isEditing = false
 
             alertMessage = "Profile updated successfully."
             showAlert = true
@@ -288,25 +289,6 @@ struct UserProfileView: View {
             alertMessage = error.localizedDescription
             showAlert = true
         }
-    }
-
-    private func sendPasswordReset() async {
-        guard !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            alertMessage = "No email found for password reset."
-            showAlert = true
-            return
-        }
-
-        authViewModel.errorMessage = ""
-        await authViewModel.sendPasswordReset(email: email)
-
-        if authViewModel.errorMessage.isEmpty {
-            alertMessage = "Password reset email sent."
-        } else {
-            alertMessage = authViewModel.errorMessage
-        }
-
-        showAlert = true
     }
 }
 

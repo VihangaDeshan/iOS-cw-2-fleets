@@ -2,6 +2,7 @@ import XCTest
 import CoreData
 @testable import FleetIQ
 
+@MainActor
 final class ServiceLogViewModelTests: XCTestCase {
 
     var context: NSManagedObjectContext!

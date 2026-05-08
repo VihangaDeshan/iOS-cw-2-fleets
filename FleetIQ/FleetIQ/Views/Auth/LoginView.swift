@@ -51,19 +51,19 @@ struct LoginView: View {
                     .padding(.top, 6)
 
                     Text("Sign in")
-                        .font(.system(size: 54, weight: .heavy))
+                        .font(.system(size: 40, weight: .heavy))
                         .foregroundStyle(.white)
 
                     Text("🚚")
-                        .font(.system(size: 54))
-                        .padding(.top, 24)
+                        .font(.system(size: 44))
+                        .padding(.top, 16)
 
                     Text("Welcome Back")
-                        .font(.system(size: 48, weight: .bold))
+                        .font(.system(size: 32, weight: .bold))
                         .foregroundStyle(.white)
 
                     Text(role == "manager" ? "Sign in as Manager" : "Sign in as Driver")
-                        .font(.title2)
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.white.opacity(0.45))
 
                     VStack(spacing: 14) {
@@ -124,6 +124,32 @@ struct LoginView: View {
                     }
                     .padding(.top, 22)
 
+                    if !authViewModel.errorMessage.isEmpty {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundStyle(.red)
+                                .font(.subheadline)
+                                .padding(.top, 1)
+
+                            Text(friendlyErrorMessage(authViewModel.errorMessage))
+                                .font(.subheadline)
+                                .foregroundStyle(.white)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.red.opacity(0.35), lineWidth: 1)
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+                        .padding(.top, 4)
+                    }
+
                     Button(action: signIn) {
                         HStack(spacing: 10) {
                             if isSubmitting {
@@ -153,7 +179,7 @@ struct LoginView: View {
                             .frame(height: 1)
 
                         Text("or")
-                            .font(.title3)
+                            .font(.subheadline.weight(.medium))
                             .foregroundStyle(Color.white.opacity(0.62))
 
                         Rectangle()
@@ -164,32 +190,32 @@ struct LoginView: View {
 
                     HStack(spacing: 30) {
                         Text("")
-                            .font(.system(size: 52, weight: .bold))
+                            .font(.system(size: 44, weight: .bold))
                             .foregroundStyle(.black)
-
+                        
                         Text("G")
-                            .font(.system(size: 52, weight: .bold))
+                            .font(.system(size: 40, weight: .bold))
                             .foregroundStyle(.white)
                             .overlay {
                                 Text("G")
-                                    .font(.system(size: 52, weight: .bold))
+                                    .font(.system(size: 40, weight: .bold))
                                     .foregroundStyle(Color.blue)
                                     .mask(
                                         Rectangle()
-                                            .frame(width: 50, height: 20)
-                                            .offset(y: 5)
+                                            .frame(width: 40, height: 16)
+                                            .offset(y: 4)
                                     )
                             }
                     }
 
                     HStack(spacing: 8) {
                         Text("Don't have an account?")
-                            .font(.title3)
+                            .font(.subheadline)
                             .foregroundStyle(Color.white.opacity(0.45))
-
+                        
                         NavigationLink(destination: RegisterView(role: role)) {
                             Text("Register")
-                                .font(.title3.weight(.bold))
+                                .font(.subheadline.weight(.bold))
                                 .foregroundStyle(Color.blue)
                         }
                     }
@@ -203,14 +229,6 @@ struct LoginView: View {
                                 .underline()
                         }
                         .padding(.top, 8)
-                    }
-
-                    if !authViewModel.errorMessage.isEmpty {
-                        Text(authViewModel.errorMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.red.opacity(0.9))
-                            .multilineTextAlignment(.center)
-                            .padding(.top, 8)
                     }
 
                     Spacer(minLength: 26)
@@ -233,10 +251,9 @@ struct LoginView: View {
     // MARK: - Private Methods
     /// Starts sign-in flow for selected role using AuthViewModel.
     private func signIn() {
-        guard !isSubmitting else {
-            return
-        }
+        guard !isSubmitting else { return }
 
+        authViewModel.errorMessage = ""
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         isSubmitting = true
 
@@ -245,10 +262,38 @@ struct LoginView: View {
 
             if authViewModel.isAuthenticated {
                 lastUsedEmail = trimmedEmail
+            } else {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    _ = authViewModel.errorMessage
+                }
             }
 
             isSubmitting = false
         }
+    }
+
+    /// Maps technical Firebase error strings to concise, user-friendly messages.
+    private func friendlyErrorMessage(_ raw: String) -> String {
+        let lowered = raw.lowercased()
+        if lowered.contains("password is invalid") || lowered.contains("wrong-password") || lowered.contains("incorrect password") {
+            return "Incorrect password. Please try again."
+        }
+        if lowered.contains("no user record") || lowered.contains("user-not-found") || lowered.contains("user not found") {
+            return "No account found with that email address."
+        }
+        if lowered.contains("badly formatted") || lowered.contains("invalid-email") {
+            return "Please enter a valid email address."
+        }
+        if lowered.contains("too-many-requests") || lowered.contains("too many") {
+            return "Too many attempts. Please wait a moment and try again."
+        }
+        if lowered.contains("network") || lowered.contains("connection") {
+            return "Connection failed. Check your internet and try again."
+        }
+        if lowered.contains("role") || lowered.contains("does not match") {
+            return "This account is registered as a different role."
+        }
+        return "Sign in failed. Please check your details and try again."
     }
 
     /// Toggles visibility state for password field.

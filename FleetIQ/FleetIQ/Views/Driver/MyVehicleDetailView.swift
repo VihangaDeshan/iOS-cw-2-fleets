@@ -17,27 +17,27 @@ struct MyVehicleDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 0) {
+            VStack(spacing: 20) {
                 heroCard
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
+                    .padding(.top, 12)
 
-                sectionHeader("DOCUMENTS")
-                documentsCard
-                    .padding(.horizontal, 12)
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionHeader("DOCUMENTS")
+                    documentsCard
+                }
 
-                sectionHeader("LAST SERVICE")
-                lastServiceCard
-                    .padding(.horizontal, 12)
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionHeader("LAST SERVICE")
+                    lastServiceCard
+                }
 
-                sectionHeader("MANAGER CONTROLS")
                 managerOnlyCard
-                    .padding(.horizontal, 12)
-
-                Spacer(minLength: 24)
+                
+                Spacer(minLength: 30)
             }
+            .padding(.horizontal, 14)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color.systemGroupedBg)
         .navigationTitle("My Vehicle")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -46,17 +46,16 @@ struct MyVehicleDetailView: View {
     private var heroCard: some View {
         let status = serviceStatus(for: vehicle)
 
-        return VStack(alignment: .leading, spacing: 0) {
+        return VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(vehicle.registration ?? "Unknown")
-                        .font(.system(size: 20, weight: .bold, design: .monospaced))
-                        .tracking(1.0)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(vehicle.registration ?? "UNKNOWN")
+                        .font(.system(size: 28, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
 
                     Text(vehicleSubtitle())
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.75))
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.8))
                 }
 
                 Spacer()
@@ -64,58 +63,46 @@ struct MyVehicleDetailView: View {
                 VehicleStatusChip(status: status)
             }
 
-            HStack(spacing: 0) {
-                statItem(label: "MILEAGE", value: String(format: "%.0f km", vehicle.currentMileage))
-
-                Divider()
-                    .background(.white.opacity(0.3))
-                    .frame(height: 28)
-                    .padding(.horizontal, 14)
-
-                statItem(
-                    label: "NEXT SERVICE",
-                    value: String(format: "%.0f km", predictedNextServiceMileage(for: vehicle))
-                )
-
-                Divider()
-                    .background(.white.opacity(0.3))
-                    .frame(height: 28)
-                    .padding(.horizontal, 14)
-
-                statItem(label: "DAYS LEFT", value: daysLeftText(for: vehicle))
+            HStack(spacing: 12) {
+                statItem(label: "ODOMETER", value: String(format: "%.0f km", vehicle.currentMileage))
+                statItem(label: "NEXT SERVICE", value: String(format: "%.0f km", predictedNextServiceMileage(for: vehicle)))
+                statItem(label: "EST. DAYS", value: daysLeftText(for: vehicle))
             }
-            .padding(.top, 12)
         }
-        .padding(14)
+        .padding(20)
         .background(
             LinearGradient(
-                colors: [.navyPrimary, .navySecondary],
+                colors: [Color.navyPrimary, Color(hex: "2E5BA8")],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         )
-        .cornerRadius(14)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: Color.navyPrimary.opacity(0.2), radius: 10, x: 0, y: 5)
     }
 
     private func statItem(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 10))
+                .font(.caption2.weight(.bold))
                 .foregroundColor(.white.opacity(0.6))
-                .tracking(0.3)
+                .tracking(0.5)
 
             Text(value)
-                .font(.system(size: 15, weight: .bold))
+                .font(.subheadline.weight(.bold))
                 .foregroundColor(.white)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.white.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func vehicleSubtitle() -> String {
         [
             vehicle.make,
             vehicle.model,
-            vehicle.year > 0 ? String(vehicle.year) : nil,
-            vehicle.fuelType
+            vehicle.year > 0 ? String(vehicle.year) : nil
         ]
         .compactMap { $0 }
         .joined(separator: " · ")
@@ -127,23 +114,25 @@ struct MyVehicleDetailView: View {
             documentRow(icon: "doc.text.fill", name: "Revenue Licence", date: vehicle.licenceExpiry)
 
             Divider()
-                .padding(.leading, 48)
+                .padding(.leading, 50)
 
-            documentRow(icon: "lock.shield.fill", name: "Insurance Certificate", date: vehicle.insuranceExpiry)
+            documentRow(icon: "shield.lefthalf.filled", name: "Insurance Certificate", date: vehicle.insuranceExpiry)
         }
-        .background(Color.white)
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
     }
 
     private func documentRow(icon: String, name: String, date: Date?) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .font(.subheadline)
                 .foregroundColor(.navyPrimary)
-                .frame(width: 28)
+                .frame(width: 36, height: 36)
+                .background(Color.navyPrimary.opacity(0.1))
+                .clipShape(Circle())
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(name)
                     .font(.subheadline.weight(.semibold))
 
@@ -161,75 +150,93 @@ struct MyVehicleDetailView: View {
             Spacer()
 
             Text(expiryChipText(for: date))
-                .font(.system(size: 11, weight: .bold))
+                .font(.caption2.weight(.bold))
                 .foregroundColor(expiryColor(for: date))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 3)
-                .background(expiryColor(for: date).opacity(0.12))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(expiryColor(for: date).opacity(0.1))
                 .clipShape(Capsule())
         }
-        .padding(13)
+        .padding(14)
     }
 
     // MARK: - Last Service
     private var lastServiceCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 14) {
             if let record = fetchLastServiceRecord() {
-                Text(record.serviceType ?? "Service")
-                    .font(.headline)
-
-                Text("Date: \(mediumDate(record.date ?? Date()))")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                Text("Mileage: \(String(format: "%.0f km", record.mileageAtService))")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                Text("Cost: LKR \(String(format: "%.0f", record.costLKR))")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.navyPrimary)
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(record.serviceType?.uppercased() ?? "SERVICE")
+                            .font(.caption2.weight(.black))
+                            .foregroundStyle(.secondary)
+                            .tracking(1)
+                        
+                        Text(mediumDate(record.date ?? Date()))
+                            .font(.headline)
+                    }
+                    
+                    Spacer()
+                    
+                    Text("LKR \(String(format: "%.0f", record.costLKR))")
+                        .font(.headline)
+                        .foregroundColor(.navyPrimary)
+                }
+                
+                Divider()
+                
+                HStack {
+                    Label("\(String(format: "%.0f km", record.mileageAtService))", systemImage: "gauge.with.needle")
+                        .font(.subheadline.weight(.medium))
+                    
+                    Spacer()
+                    
+                    Text("Service completed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } else {
-                Text("No service records found for this vehicle.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                ContentUnavailableView(
+                    "No Records",
+                    systemImage: "wrench.adjust.fill",
+                    description: Text("No service records found for this vehicle.")
+                )
+                .padding(.vertical, 20)
             }
         }
-        .padding(13)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white)
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+        .padding(16)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
     }
 
     // MARK: - Manager Controls
     private var managerOnlyCard: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Image(systemName: "lock.fill")
-                .foregroundColor(.secondary)
-
-            Text("Vehicle edits, driver assignment, and cost reports are managed by your fleet manager.")
                 .font(.subheadline)
+                .foregroundColor(.secondary)
+                .frame(width: 32, height: 32)
+                .background(Color(.systemGray6))
+                .clipShape(Circle())
+
+            Text("Vehicle details, driver assignment, and cost reports are managed by your fleet manager.")
+                .font(.caption)
                 .foregroundColor(.secondary)
 
             Spacer()
         }
-        .padding(13)
-        .background(Color.white)
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+        .padding(12)
+        .background(Color(.systemGray6).opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Helpers
     private func sectionHeader(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.caption.weight(.semibold))
             .foregroundColor(.secondary)
             .tracking(0.5)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 26)
-            .padding(.top, 18)
-            .padding(.bottom, 4)
+            .padding(.horizontal, 4)
     }
 
     private func predictedNextServiceMileage(for vehicle: VehicleEntity) -> Double {

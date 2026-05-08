@@ -53,11 +53,14 @@ struct OnboardingView: View {
 
                 if currentStep < 2 {
                     Button(action: nextStep) {
-                        Text(currentStep == 0 ? "Get Started" : "Continue ->")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
+                        HStack(spacing: 8) {
+                            Text(currentStep == 0 ? "Get Started" : "Continue")
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
                             .background(
                                 Capsule()
                                     .fill(Color.blue)
@@ -71,9 +74,11 @@ struct OnboardingView: View {
                             if isAuthenticating {
                                 ProgressView()
                                     .tint(Color.navyPrimary)
+                            } else {
+                                Image(systemName: "faceid")
                             }
 
-                            Text(isAuthenticating ? "Enabling..." : "Enable Face ID ->")
+                            Text(isAuthenticating ? "Enabling..." : "Enable Face ID")
                                 .font(.title3.weight(.semibold))
                         }
                         .foregroundStyle(Color.navyPrimary)
@@ -168,11 +173,11 @@ private struct OnboardingStepOneView: View {
                     }
 
                 Text("FleetIQ")
-                    .font(.system(size: 52, weight: .heavy))
+                    .font(.system(size: 40, weight: .heavy))
                     .foregroundStyle(.white)
 
                 Text("Intelligent Fleet Management &\nMaintenance for Sri Lanka")
-                    .font(.title2)
+                    .font(.title3.weight(.medium))
                     .foregroundStyle(Color.white.opacity(0.85))
                     .multilineTextAlignment(.center)
 
@@ -210,11 +215,11 @@ private struct OnboardingStepTwoView: View {
                     }
 
                 Text("How FleetIQ works")
-                    .font(.system(size: 48, weight: .heavy))
+                    .font(.system(size: 38, weight: .heavy))
                     .foregroundStyle(.white)
 
                 Text("Two user types — both connected live")
-                    .font(.title2)
+                    .font(.title3.weight(.medium))
                     .foregroundStyle(Color.white.opacity(0.82))
 
                 OnboardingRoleCard(
@@ -280,11 +285,11 @@ private struct OnboardingStepThreeView: View {
                 }
 
                 Text("Secure Your Fleet Data")
-                    .font(.system(size: 48, weight: .heavy))
+                    .font(.system(size: 38, weight: .heavy))
                     .foregroundStyle(.white)
 
                 Text("FleetIQ protects driver records and\nfinancial data with Face ID")
-                    .font(.title2)
+                    .font(.title3.weight(.medium))
                     .foregroundStyle(Color.white.opacity(0.74))
                     .multilineTextAlignment(.center)
 
@@ -331,7 +336,7 @@ private struct OnboardingBulletRow: View {
                 .frame(width: 34)
 
             Text(text)
-                .font(.title3)
+                .font(.subheadline)
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.leading)
 
@@ -372,7 +377,7 @@ private struct OnboardingRoleCard: View {
                         .foregroundStyle(.white)
 
                     Text(subtitle)
-                        .font(.headline)
+                        .font(.caption.weight(.bold))
                         .foregroundStyle(Color.white.opacity(0.58))
                 }
             }
@@ -385,7 +390,7 @@ private struct OnboardingRoleCard: View {
                         .padding(.top, 1)
 
                     Text(item)
-                        .font(.title3)
+                        .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.95))
                 }
                 .padding(.top, 2)

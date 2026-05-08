@@ -9,116 +9,56 @@ import SwiftUI
 
 // MARK: - Driver Tab View
 struct DriverTabView: View {
-    @State private var selectedTab: DriverTab = .home
+    @State private var selectedTab: Int = 0
 
-    var body: some View {
-        ZStack(alignment: .bottom) {
-            currentTabView
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            bottomBar
-                .padding(.horizontal, 22)
-                .padding(.bottom, 10)
-        }
-        .background(Color.systemGroupedBg)
+    init() {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithDefaultBackground()
+        appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+        
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
     }
 
-    @ViewBuilder
-    private var currentTabView: some View {
-        switch selectedTab {
-        case .home:
+    var body: some View {
+        TabView(selection: $selectedTab) {
             DriverHomeView()
+                .tabItem {
+                    Label("Home", systemImage: "house.fill")
+                }
+                .tag(0)
 
-        case .fuel:
-            DriverFuelView()
+            NavigationStack {
+                DriverFuelView()
+            }
+            .tabItem {
+                Label("Fuel", systemImage: "fuelpump.fill")
+            }
+            .tag(1)
 
-        case .faults:
             NavigationStack {
                 MyFaultHistoryView()
             }
-
-        case .records:
-            DriverRecordsView()
-
-        case .settings:
-            DriverSettingsView()
-        }
-    }
-
-    private var bottomBar: some View {
-        HStack(spacing: 4) {
-            ForEach(DriverTab.allCases, id: \.self) { tab in
-                Button {
-                    selectedTab = tab
-                } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 23, weight: .semibold))
-                            .opacity(0.001)
-                            .frame(height: 0)
-
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 21, weight: .medium))
-
-                        Text(tab.title)
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(selectedTab == tab ? Color(hex: "1562D4") : .primary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(selectedTab == tab ? Color(hex: "EEF1F5") : .clear)
-                    )
-                }
-                .buttonStyle(.plain)
+            .tabItem {
+                Label("Faults", systemImage: "exclamationmark.triangle.fill")
             }
-        }
-        .padding(7)
-        .background(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 2)
-        )
-    }
-}
+            .tag(2)
 
-// MARK: - Driver Tabs
-private enum DriverTab: CaseIterable {
-    case home
-    case fuel
-    case faults
-    case records
-    case settings
+            NavigationStack {
+                DriverRecordsView()
+            }
+            .tabItem {
+                Label("Records", systemImage: "doc.text.fill")
+            }
+            .tag(3)
 
-    var title: String {
-        switch self {
-        case .home:
-            return "Home"
-        case .fuel:
-            return "Fuel"
-        case .faults:
-            return "Faults"
-        case .records:
-            return "Records"
-        case .settings:
-            return "Settings"
+            DriverSettingsView()
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape.fill")
+                }
+                .tag(4)
         }
-    }
-
-    var icon: String {
-        switch self {
-        case .home:
-            return "house"
-        case .fuel:
-            return "car"
-        case .faults:
-            return "exclamationmark.triangle"
-        case .records:
-            return "doc.text"
-        case .settings:
-            return "gearshape"
-        }
+        .tint(.navyPrimary)
     }
 }
 

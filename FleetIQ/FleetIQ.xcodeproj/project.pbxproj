@@ -30,12 +30,18 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		AA5D0C1A2F8AB5F700777C17 /* SampleDocuments */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SampleDocuments; path = SampleDocuments; sourceTree = "<group>"; };
 		E57C863D2F8AB5F700777C17 /* FleetIQ.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FleetIQ.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E57C864F2F8AB5F900777C17 /* FleetIQTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FleetIQTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E57C86592F8AB5FA00777C17 /* FleetIQUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FleetIQUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		AA1C23452F8AB5F900777C17 /* FleetIQTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FleetIQTests;
+			sourceTree = "<group>";
+		};
 		E57C863F2F8AB5F700777C17 /* FleetIQ */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = FleetIQ;
@@ -87,7 +93,9 @@
 			isa = PBXGroup;
 			children = (
 				E57C863F2F8AB5F700777C17 /* FleetIQ */,
+				AA1C23452F8AB5F900777C17 /* FleetIQTests */,
 				E57C865C2F8AB5FA00777C17 /* FleetIQUITests */,
+				AA5D0C1A2F8AB5F700777C17 /* SampleDocuments */,
 				E505ED3C2F8AD88F00DC7CAE /* Frameworks */,
 				E57C863E2F8AB5F700777C17 /* Products */,
 			);
@@ -143,6 +151,9 @@
 			);
 			dependencies = (
 				E57C86512F8AB5F900777C17 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AA1C23452F8AB5F900777C17 /* FleetIQTests */,
 			);
 			name = FleetIQTests;
 			packageProductDependencies = (

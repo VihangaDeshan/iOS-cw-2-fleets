@@ -57,158 +57,214 @@ struct DriverRecordsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            List {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
                 if let vehicle = assignedVehicle {
-                    Section {
-                        summaryCard(for: vehicle)
-                    }
-                    .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 8, trailing: 14))
-                    .listRowBackground(Color.clear)
+                    summaryCard(for: vehicle)
+                    
+                    filterPicker
+                    
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("RECENT RECORDS")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                            .tracking(0.5)
+                            .padding(.horizontal, 4)
 
-                    Section {
-                        filterPicker
-                    }
-                    .listRowInsets(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 14))
-                    .listRowBackground(Color.clear)
-
-                    Section("RECENT RECORDS") {
                         if filteredEntries.isEmpty {
-                            Text(selectedFilter.emptyText)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
+                            ContentUnavailableView(
+                                selectedFilter.title,
+                                systemImage: "doc.text",
+                                description: Text(selectedFilter.emptyText)
+                            )
+                            .padding(.top, 40)
                         } else {
-                            ForEach(filteredEntries, id: \.id) { entry in
-                                switch entry {
-                                case .trip(let trip):
-                                    tripRow(trip)
-                                case .fuel(let fuel):
-                                    fuelRow(fuel)
+                            LazyVStack(spacing: 12) {
+                                ForEach(filteredEntries, id: \.id) { entry in
+                                    switch entry {
+                                    case .trip(let trip):
+                                        tripRow(trip)
+                                    case .fuel(let fuel):
+                                        fuelRow(fuel)
+                                    }
                                 }
                             }
                         }
                     }
                 } else {
-                    Section {
-                        ContentUnavailableView(
-                            "No Vehicle Assigned",
-                            systemImage: "doc.text",
-                            description: Text("Ask your manager to assign a vehicle to view records.")
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
+                    ContentUnavailableView(
+                        "No Vehicle Assigned",
+                        systemImage: "doc.text",
+                        description: Text("Ask your manager to assign a vehicle to view records.")
+                    )
+                    .padding(.top, 60)
                 }
             }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Records")
-            .navigationBarTitleDisplayMode(.inline)
-            .task(id: normalizedVehicleId) {
-                loadRecords()
-                await syncFromFirestore()
-            }
-            .refreshable {
-                loadRecords()
-                await syncFromFirestore()
-            }
+            .padding(16)
+        }
+        .background(Color.systemGroupedBg)
+        .navigationTitle("Records")
+        .task(id: normalizedVehicleId) {
+            loadRecords()
+            await syncFromFirestore()
+        }
+        .refreshable {
+            loadRecords()
+            await syncFromFirestore()
         }
     }
 
     private var filterPicker: some View {
-        Picker("Type", selection: $selectedFilter) {
-            ForEach(DriverRecordFilter.allCases, id: \.self) { filter in
-                Text(filter.title).tag(filter)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(DriverRecordFilter.allCases, id: \.self) { filter in
+                    Button {
+                        selectedFilter = filter
+                    } label: {
+                        Text(filter.title)
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(selectedFilter == filter ? Color.navyPrimary : Color(.systemBackground))
+                            .foregroundColor(selectedFilter == filter ? .white : .primary)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(selectedFilter == filter ? Color.clear : Color(.systemGray5), lineWidth: 1)
+                            )
+                    }
+                }
             }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
         }
-        .pickerStyle(.segmented)
     }
 
-    private func summaryCard(for vehicle: VehicleEntity) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(vehicle.registration ?? "Vehicle")
-                .font(.headline.weight(.bold))
-
+    private func summaryCard(for vehicle: some VehicleEntity) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
             HStack {
-                summaryItem(title: "Trips", value: "\(trips.count)")
-                summaryItem(title: "Fuel Logs", value: "\(fuelLogs.count)")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("MONTHLY SUMMARY")
+                        .font(.caption2.weight(.black))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .tracking(1.5)
+                    
+                    Text(vehicle.registration ?? "VEHICLE")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                }
+                Spacer()
+                Image(systemName: "chart.bar.fill")
+                    .font(.title2)
+                    .foregroundStyle(.white.opacity(0.5))
             }
 
-            HStack {
-                summaryItem(title: "This Month KM", value: String(format: "%.1f", monthTripDistance))
-                summaryItem(title: "This Month Fuel", value: "LKR \(String(format: "%.0f", monthFuelCost))")
+            HStack(spacing: 12) {
+                summaryItem(title: "DISTANCE", value: String(format: "%.1f km", monthTripDistance))
+                summaryItem(title: "FUEL COST", value: "LKR \(String(format: "%.0f", monthFuelCost))")
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(20)
+        .background(
+            LinearGradient(
+                colors: [Color.navyPrimary, Color(hex: "2E5BA8")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: Color.navyPrimary.opacity(0.2), radius: 10, x: 0, y: 5)
     }
 
     private func summaryItem(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(.caption2.weight(.bold))
+                .foregroundColor(.white.opacity(0.6))
+                .tracking(0.5)
 
             Text(value)
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.navyPrimary)
+                .font(.subheadline.weight(.bold))
+                .foregroundColor(.white)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.white.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func tripRow(_ trip: TripLogEntity) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Label("Trip", systemImage: "road.lanes")
-                    .font(.caption.weight(.semibold))
+        HStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(Color.navyPrimary.opacity(0.1))
+                    .frame(width: 44, height: 44)
+                
+                Image(systemName: "road.lanes")
                     .foregroundColor(.navyPrimary)
-
-                Spacer()
-
-                Text(String(format: "%.1f km", trip.distanceKm))
-                    .font(.caption.weight(.bold))
-                    .foregroundColor(.navyPrimary)
+                    .font(.system(size: 18))
             }
-
-            Text(trip.purpose ?? "Trip")
-                .font(.subheadline.weight(.semibold))
-
-            Text(trip.destination ?? "-")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            Text(mediumDate(trip.date ?? Date()))
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(trip.purpose ?? "Trip")
+                        .font(.subheadline.weight(.bold))
+                    Spacer()
+                    Text(String(format: "%.1f km", trip.distanceKm))
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.navyPrimary)
+                }
+                
+                Text(trip.destination ?? "Local Trip")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Text(mediumDate(trip.date ?? Date()))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
-        .padding(.vertical, 3)
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
     }
 
     private func fuelRow(_ fuel: FuelLogEntity) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Label("Fuel", systemImage: "fuelpump")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.statusDueSoon)
-
-                Spacer()
-
-                Text("LKR \(String(format: "%.0f", fuel.totalCostLKR))")
-                    .font(.caption.weight(.bold))
-                    .foregroundColor(.navyPrimary)
+        HStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(Color.statusActive.opacity(0.1))
+                    .frame(width: 44, height: 44)
+                
+                Image(systemName: "fuelpump.fill")
+                    .foregroundColor(.statusActive)
+                    .font(.system(size: 18))
             }
-
-            Text("\(String(format: "%.1f", fuel.litres)) L at \(String(format: "%.0f", fuel.mileage)) km")
-                .font(.subheadline.weight(.semibold))
-
-            Text("LKR \(String(format: "%.2f", fuel.costPerLitre))/L")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            Text(mediumDate(fuel.date ?? Date()))
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Fuel Fill-up")
+                        .font(.subheadline.weight(.bold))
+                    Spacer()
+                    Text("LKR \(String(format: "%.0f", fuel.totalCostLKR))")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.navyPrimary)
+                }
+                
+                Text("\(String(format: "%.1f", fuel.litres)) L at \(String(format: "%.0f", fuel.mileage)) km")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Text(mediumDate(fuel.date ?? Date()))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
-        .padding(.vertical, 3)
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
     }
 
     private func syncFromFirestore() async {

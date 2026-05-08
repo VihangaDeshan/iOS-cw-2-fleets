@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import CoreData
 
 // MARK: - Manager Fault List View
 struct FaultListView: View {
@@ -13,31 +14,37 @@ struct FaultListView: View {
     @EnvironmentObject private var fleetViewModel: FleetViewModel
     @StateObject private var faultViewModel = FaultViewModel()
 
-    @State private var selectedFilter: FaultListFilter = .all
+    @State private var searchText = ""
+    @State private var selectedFilter = "All"
     @State private var errorText: String = ""
     @State private var driverNameById: [String: String] = [:]
 
     private let firestoreService = FirestoreService.shared
+    private let filters = ["All", "Open", "In Progress", "Resolved"]
 
     private var normalizedFleetId: String {
         authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var filteredFaults: [FaultReportEntity] {
-        switch selectedFilter {
-        case .all:
-            return faultViewModel.faultReports
-        case .open:
-            return faultViewModel.faultReports.filter {
-                statusCategory(for: $0.status ?? "open") == .open
+        let searched = searchText.isEmpty
+            ? faultViewModel.faultReports
+            : faultViewModel.faultReports.filter {
+                ($0.descriptionText ?? "").localizedCaseInsensitiveContains(searchText) ||
+                (shortVehicleLabel(for: $0)).localizedCaseInsensitiveContains(searchText)
             }
-        case .inProgress:
-            return faultViewModel.faultReports.filter {
-                statusCategory(for: $0.status ?? "open") == .inProgress
-            }
-        case .resolved:
-            return faultViewModel.faultReports.filter {
-                statusCategory(for: $0.status ?? "open") == .resolved
+
+        if selectedFilter == "All" {
+            return searched
+        }
+
+        return searched.filter {
+            let cat = statusCategory(for: $0.status ?? "open")
+            switch selectedFilter {
+            case "Open": return cat == .open
+            case "In Progress": return cat == .inProgress
+            case "Resolved": return cat == .resolved
+            default: return true
             }
         }
     }
@@ -55,65 +62,98 @@ struct FaultListView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    headerCard
-                }
-                .listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 8, trailing: 14))
-                .listRowBackground(Color.clear)
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Search Bar (Matching Fleet Layout)
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                            .font(.subheadline)
 
-                if !errorText.isEmpty {
-                    Section {
+                        TextField("Search faults…", text: $searchText)
+                            .font(.subheadline)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color(.systemGray6))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+
+                    // Filter Pills (Matching Fleet Layout)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(filters, id: \.self) { filter in
+                                FilterPill(
+                                    title: filter,
+                                    count: countForFilter(filter),
+                                    isSelected: selectedFilter == filter
+                                ) {
+                                    selectedFilter = filter
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                    }
+
+                    if !errorText.isEmpty {
                         Text(errorText)
                             .font(.subheadline)
                             .foregroundStyle(Color.statusOverdue)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 4)
                     }
-                }
 
-                if normalizedFleetId.isEmpty {
-                    Section {
+                    if normalizedFleetId.isEmpty {
                         ContentUnavailableView(
                             "Fleet Not Ready",
                             systemImage: "building.2.crop.circle",
                             description: Text("Manager account is missing fleet configuration.")
                         )
-                        .frame(maxWidth: .infinity)
-                    }
-                } else if filteredFaults.isEmpty {
-                    Section {
+                        .padding(.top, 40)
+                    } else if filteredFaults.isEmpty {
                         ContentUnavailableView(
-                            selectedFilter.emptyTitle,
-                            systemImage: "exclamationmark.triangle",
-                            description: Text(selectedFilter.emptySubtitle)
+                            searchText.isEmpty ? "No Fault Reports" : "No Results",
+                            systemImage: searchText.isEmpty ? "exclamationmark.triangle" : "magnifyingglass",
+                            description: Text(searchText.isEmpty ? "Driver reported faults will appear here." : "Try a different search or filter")
                         )
-                        .frame(maxWidth: .infinity)
-                    }
-                } else {
-                    ForEach(orderedGroups, id: \.self) { group in
-                        Section(group.headerTitle) {
-                            ForEach(groupedFaults[group] ?? [], id: \.id) { fault in
-                                NavigationLink {
-                                    FaultDetailView(
-                                        fault: fault,
-                                        fleetId: normalizedFleetId,
-                                        faultViewModel: faultViewModel
-                                    )
-                                } label: {
-                                    faultRow(for: fault)
+                        .padding(.top, 40)
+                    } else {
+                        ForEach(orderedGroups, id: \.self) { group in
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(group.headerTitle)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.secondary)
+                                    .tracking(0.5)
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 12)
+                                
+                                LazyVStack(spacing: 10) {
+                                    ForEach(groupedFaults[group] ?? [], id: \.id) { fault in
+                                        NavigationLink {
+                                            FaultDetailView(
+                                                fault: fault,
+                                                fleetId: normalizedFleetId,
+                                                faultViewModel: faultViewModel
+                                            )
+                                        } label: {
+                                            faultCard(for: fault)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
                                 }
-                                .buttonStyle(.plain)
-                                .listRowBackground(isCritical(fault) ? Color.chipRedBg.opacity(0.58) : Color.clear)
+                                .padding(.horizontal, 12)
                             }
                         }
                     }
+                    
+                    Spacer(minLength: 40)
                 }
             }
-            .listStyle(.insetGrouped)
+            .background(Color.systemGroupedBg)
             .navigationTitle("Fault Reports")
             .navigationBarTitleDisplayMode(.large)
-            .safeAreaInset(edge: .top) {
-                filterPicker
-            }
             .task(id: normalizedFleetId) {
                 guard !normalizedFleetId.isEmpty else {
                     return
@@ -135,53 +175,20 @@ struct FaultListView: View {
         }
     }
 
-    private var headerCard: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Fault Reports")
-                    .font(.headline.weight(.semibold))
-                Text("Live driver-reported incidents")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+    private func faultCard(for fault: FaultReportEntity) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    // Registration as Title (Matching Fleet Card Layout)
+                    Text(shortVehicleLabel(for: fault))
+                        .font(.system(size: 15, weight: .bold, design: .monospaced))
+                        .tracking(1.0)
+                        .foregroundColor(.primary)
 
-            Spacer()
-
-            Text("Open \(faultViewModel.openFaultCount)")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(Color.chipRedText)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.chipRedBg)
-                .clipShape(Capsule())
-        }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var filterPicker: some View {
-        HStack {
-            Picker("Status", selection: $selectedFilter) {
-                ForEach(FaultListFilter.allCases, id: \.self) { filter in
-                    Text(filter.title).tag(filter)
-                }
-            }
-            .pickerStyle(.segmented)
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
-        .padding(.top, 8)
-        .background(Color(.systemGroupedBackground))
-    }
-
-    private func faultRow(for fault: FaultReportEntity) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
                     Text(fault.descriptionText ?? "Fault report")
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
 
                     Text("\(formattedUrgency(fault.urgency ?? "medium")) urgency")
                         .font(.caption)
@@ -199,21 +206,56 @@ struct FaultListView: View {
                 }
 
                 Text(driverLabel(for: fault))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+
+                Text("\u{2022}")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 Text(formattedDate(fault.createdAt))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
 
                 Spacer()
 
-                Text(shortVehicleLabel(for: fault))
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                // Details Button (Matching Fleet Card Style)
+                HStack(spacing: 4) {
+                    Text("Details")
+                        .font(.caption2.weight(.semibold))
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                }
+                .foregroundColor(.navyPrimary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.navyPrimary.opacity(0.1))
+                .clipShape(Capsule())
             }
+            
+            // Bottom Accent Line (Matching Fleet Card Design)
+            Capsule()
+                .fill(urgencyColor(for: fault.urgency ?? "medium"))
+                .frame(height: 3)
+                .padding(.top, 4)
         }
-        .padding(.vertical, 4)
+        .padding(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+    }
+
+    private func countForFilter(_ filter: String) -> Int {
+        switch filter {
+        case "Open":
+            return faultViewModel.faultReports.filter { statusCategory(for: $0.status ?? "open") == .open }.count
+        case "In Progress":
+            return faultViewModel.faultReports.filter { statusCategory(for: $0.status ?? "open") == .inProgress }.count
+        case "Resolved":
+            return faultViewModel.faultReports.filter { statusCategory(for: $0.status ?? "open") == .resolved }.count
+        default:
+            return faultViewModel.faultReports.count
+        }
     }
 
     private var photoIndicator: some View {
@@ -253,10 +295,10 @@ struct FaultListView: View {
         }
 
         return Text(label)
-            .font(.caption2.weight(.bold))
+            .font(.system(size: 11, weight: .bold))
             .foregroundStyle(textColor)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
             .background(bgColor)
             .clipShape(Capsule())
     }
@@ -308,13 +350,6 @@ struct FaultListView: View {
         return photoURL.hasPrefix("http")
             || photoURL.hasPrefix("storage_path:")
             || photoURL == "upload_failed"
-    }
-
-    private func isCritical(_ fault: FaultReportEntity) -> Bool {
-        let normalized = (fault.urgency ?? "medium")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        return normalized == "critical" || normalized == "high"
     }
 
     private func shortVehicleLabel(for fault: FaultReportEntity) -> String {
@@ -371,59 +406,14 @@ struct FaultListView: View {
     }
 }
 
-// MARK: - Filter
-private enum FaultListFilter: String, CaseIterable {
-    case all
-    case open
-    case inProgress
-    case resolved
-
-    var title: String {
-        switch self {
-        case .all:
-            return "All"
-        case .open:
-            return "Open"
-        case .inProgress:
-            return "In Progress"
-        case .resolved:
-            return "Resolved"
-        }
-    }
-
-    var emptyTitle: String {
-        switch self {
-        case .all:
-            return "No Fault Reports"
-        case .open:
-            return "No Open Faults"
-        case .inProgress:
-            return "No In-Progress Faults"
-        case .resolved:
-            return "No Resolved Faults"
-        }
-    }
-
-    var emptySubtitle: String {
-        switch self {
-        case .all:
-            return "Driver reported faults will appear here."
-        case .open:
-            return "New issues waiting for action will appear here."
-        case .inProgress:
-            return "Acknowledged and workshop-booked issues appear here."
-        case .resolved:
-            return "Resolved issues appear here after closure."
-        }
-    }
-}
-
+// MARK: - Filter Status Category
 private enum FaultStatusCategory {
     case open
     case inProgress
     case resolved
 }
 
+// MARK: - Date Grouping
 private enum FaultDateGroup: Hashable, Comparable {
     case today
     case yesterday
@@ -467,7 +457,9 @@ private enum FaultDateGroup: Hashable, Comparable {
     }
 }
 
+
 #Preview {
     FaultListView()
         .environmentObject(AuthViewModel())
+        .environmentObject(FleetViewModel())
 }

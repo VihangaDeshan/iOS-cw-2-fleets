@@ -151,7 +151,7 @@ struct AddServiceRecordView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(maxHeight: 160)
-                        .cornerRadius(8)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .accessibilityLabel("Selected invoice photo")
                 }
 

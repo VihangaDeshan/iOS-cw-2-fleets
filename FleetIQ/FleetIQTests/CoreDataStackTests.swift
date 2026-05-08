@@ -31,6 +31,7 @@ final class CoreDataStackTests: XCTestCase {
         vehicle.year = 2020
         vehicle.fuelType = "Diesel"
         vehicle.currentMileage = 10000
+        vehicle.createdAt = Date()
 
         // When
         try context.save()

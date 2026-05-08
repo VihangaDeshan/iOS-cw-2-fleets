@@ -25,18 +25,20 @@ struct DriverHomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    let _ = syncToggle // Force redraw
+                VStack(alignment: .leading, spacing: 20) {
                     headerSection
-                    vehicleTitle
+                        .padding(.top, 12)
+
                     vehicleSection
+                    
                     statsSection
+                    
                     quickActionsSection
+                    
                     todayActivitySection
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 12)
-                .padding(.bottom, 26)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 30)
             }
             .background(Color.systemGroupedBg)
             .navigationBarHidden(true)
@@ -54,23 +56,16 @@ struct DriverHomeView: View {
         .task(id: startKey) {
             viewModel.start(authViewModel: authViewModel)
 
-            let fleetId = authViewModel.fleetId
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let driverId = authViewModel.currentUID
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let fleetId = authViewModel.fleetId.trimmingCharacters(in: .whitespacesAndNewlines)
+            let driverId = authViewModel.currentUID.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if !fleetId.isEmpty, !driverId.isEmpty {
-                driverFaultVM.startMyFaultListener(
-                    fleetId: fleetId,
-                    driverId: driverId)
+                driverFaultVM.startMyFaultListener(fleetId: fleetId, driverId: driverId)
             }
 
-            // Fire welcome notification once per session
             if !hasFireredLoginNotification {
                 hasFireredLoginNotification = true
-                let name = authViewModel.currentUserName
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                NotificationService.shared.sendDriverWelcome(name: name)
+                NotificationService.shared.sendDriverWelcome(name: authViewModel.currentUserName)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DriverAnalyticsDidSync"))) { _ in
@@ -82,8 +77,8 @@ struct DriverHomeView: View {
                 fleetId: authViewModel.fleetId,
                 expiredDocsSummary: viewModel.expiredDocsSummary
             )
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .onDisappear {
             viewModel.stop()
@@ -93,211 +88,207 @@ struct DriverHomeView: View {
     // MARK: - Header
     private var headerSection: some View {
         HStack(alignment: .center) {
-            Text("Hi \(displayName)")
-                .font(.largeTitle.weight(.bold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Hi \(displayName)")
+                    .font(.title.weight(.bold))
+                    .foregroundColor(.primary)
+            }
 
             Spacer()
 
-            Button {
-                showDriverNotifications = true
-            } label: {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "bell.fill")
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(.black)
-
-                    let unresolved = driverFaultVM.myFaults.filter {
-                        let s = ($0.status ?? "open").lowercased()
-                        guard s != "open" && s != "resolved" && s != "acknowledged" else { return false }
-                        let id = $0.id?.uuidString ?? ""
-                        return !driverFaultVM.readNotificationIds.contains(id)
-                    }.count
-                    
-                    let badgeCount = unresolved + viewModel.expiredDocsSummary.count
-
-                    if badgeCount > 0 {
-                        Text("\(min(badgeCount, 9))")
-                            .font(.caption2.weight(.bold))
-                            .foregroundColor(.white)
-                            .padding(4)
-                            .background(Color.statusOverdue)
+            HStack(spacing: 12) {
+                Button {
+                    showDriverNotifications = true
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "bell.fill")
+                            .font(.title3)
+                            .foregroundStyle(.primary)
+                            .padding(10)
+                            .background(Color(.systemBackground))
                             .clipShape(Circle())
-                            .offset(x: 8, y: -8)
+                            .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
+
+                        let unresolved = driverFaultVM.myFaults.filter {
+                            let s = ($0.status ?? "open").lowercased()
+                            guard s != "open" && s != "resolved" && s != "acknowledged" else { return false }
+                            let id = $0.id?.uuidString ?? ""
+                            return !driverFaultVM.readNotificationIds.contains(id)
+                        }.count
+                        
+                        let badgeCount = unresolved + viewModel.expiredDocsSummary.count
+
+                        if badgeCount > 0 {
+                            Text("\(badgeCount)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 18, height: 18)
+                                .background(Color.statusOverdue)
+                                .clipShape(Circle())
+                                .offset(x: 4, y: -4)
+                        }
                     }
                 }
-            }
-            .accessibilityLabel("View notifications")
 
-            NavigationLink {
-                DriverProfileView()
-                    .environmentObject(authViewModel)
-            } label: {
-                Image(systemName: "person.crop.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.black)
+                NavigationLink {
+                    DriverProfileView()
+                        .environmentObject(authViewModel)
+                } label: {
+                    Text(managerInitials)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.white)
+                        .frame(width: 40, height: 40)
+                        .background(Color.navyPrimary)
+                        .clipShape(Circle())
+                }
             }
-            .buttonStyle(.plain)
         }
     }
 
-    private var vehicleTitle: some View {
-        Text("My Vehicle")
-            .font(.title.weight(.bold))
+    private var managerInitials: String {
+        let name = authViewModel.currentUserName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return "D" }
+        let parts = name.split(separator: " ")
+        if parts.count >= 2 {
+            return String(parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
+        }
+        return String(name.prefix(1)).uppercased()
     }
 
     // MARK: - Vehicle
     @ViewBuilder
     private var vehicleSection: some View {
-        if let vehicle = viewModel.assignedVehicle {
-            NavigationLink {
-                MyVehicleDetailView(vehicle: vehicle)
-                    .environmentObject(authViewModel)
-            } label: {
-                vehicleHeroCard(vehicle)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("MY ASSIGNED VEHICLE")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+
+            if let vehicle = viewModel.assignedVehicle {
+                NavigationLink {
+                    MyVehicleDetailView(vehicle: vehicle)
+                        .environmentObject(authViewModel)
+                } label: {
+                    vehicleHeroCard(vehicle)
+                }
+                .buttonStyle(.plain)
+            } else {
+                ContentUnavailableView(
+                    "No Vehicle Assigned",
+                    systemImage: "car.fill",
+                    description: Text("Ask your manager for a vehicle assignment.")
+                )
+                .padding(.vertical, 40)
+                .frame(maxWidth: .infinity)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            .buttonStyle(.plain)
-        } else {
-            ContentUnavailableView(
-                "No Vehicle Assigned",
-                systemImage: "car.fill",
-                description: Text("Your manager has not assigned a vehicle yet.")
-            )
-            .frame(maxWidth: .infinity, minHeight: 230)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         }
     }
 
     private func vehicleHeroCard(_ vehicle: VehicleEntity) -> some View {
         let remainingDays = viewModel.daysUntilService(for: vehicle)
+        let status = viewModel.serviceStatus(for: vehicle)
 
         return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(viewModel.serviceStatus(for: vehicle).uppercased())
-                        .font(.title2.weight(.bold))
-                        .opacity(0.001)
-                        .frame(height: 0)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(status.uppercased())
+                        .font(.caption2.weight(.black))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .tracking(1.5)
 
-                    Text(viewModel.serviceStatus(for: vehicle).uppercased())
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .tracking(1)
-
-                    Text(vehicle.registration ?? "Unknown")
-                        .font(.largeTitle.weight(.heavy))
+                    Text(vehicle.registration ?? "UNKNOWN")
+                        .font(.system(size: 32, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.45)
 
                     Text("\(vehicle.make ?? "") \(vehicle.model ?? "")")
-                        .font(.title3.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.9))
                 }
 
-                Spacer(minLength: 12)
+                Spacer()
 
-                Text("View")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.18))
-                    .clipShape(Capsule())
+                Image(systemName: "chevron.right.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.white.opacity(0.5))
             }
+
+            Spacer(minLength: 20)
 
             HStack(spacing: 12) {
-                metricPill(title: "TOTAL ODOMETER", value: String(format: "%.0f km", vehicle.currentMileage))
-                metricPill(title: "NEXT SERVICE", value: remainingDays < 0 ? "\(abs(remainingDays))d over" : (remainingDays == 0 ? "Due now" : "In \(remainingDays) days"))
+                metricPill(title: "ODOMETER", value: String(format: "%.0f km", vehicle.currentMileage))
+                metricPill(title: "NEXT SERVICE", value: remainingDays < 0 ? "OVERDUE" : "\(remainingDays)d")
             }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, minHeight: 300, alignment: .topLeading)
+        .padding(20)
+        .frame(maxWidth: .infinity, minHeight: 220)
         .background(
             LinearGradient(
-                colors: [Color(hex: "1A75DE"), Color(hex: "155FD4")],
+                colors: [Color.navyPrimary, Color(hex: "2E5BA8")],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         )
-        .overlay(alignment: .trailing) {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [Color(hex: "1E88F2").opacity(0.55), .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: 150)
-                .padding(.trailing, 10)
-                .padding(.vertical, 10)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: Color.navyPrimary.opacity(0.2), radius: 10, x: 0, y: 5)
     }
 
     private func metricPill(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.white.opacity(0.78))
-                .tracking(0.8)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white.opacity(0.6))
+                .tracking(0.5)
 
             Text(value)
-                .font(.largeTitle.weight(.bold))
-                .opacity(0.001)
-                .frame(height: 0)
-
-            Text(value)
-                .font(.title.weight(.bold))
+                .font(.headline.weight(.bold))
                 .foregroundStyle(.white)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.14))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: - Stats
     private var statsSection: some View {
         HStack(spacing: 12) {
-            statCard(title: "TRIPS TODAY", value: "\(viewModel.todayTrips)")
-            statCard(title: "KM DRIVEN", value: String(format: "%.0f", viewModel.todayKmDriven))
-            statCard(title: "OPEN FAULTS", value: "\(viewModel.openFaults)")
+            statCard(title: "TRIPS", value: "\(viewModel.todayTrips)", icon: "road.lanes")
+            statCard(title: "DISTANCE", value: String(format: "%.0f km", viewModel.todayKmDriven), icon: "gauge.with.needle")
+            statCard(title: "FAULTS", value: "\(viewModel.openFaults)", icon: "exclamationmark.octagon")
         }
     }
 
-    private func statCard(title: String, value: String) -> some View {
-        VStack(spacing: 7) {
-            Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(Color(hex: "8595AD"))
-
+    private func statCard(title: String, value: String, icon: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.secondary)
+            
             Text(value)
-                .font(.title.weight(.bold))
+                .font(.headline.weight(.bold))
                 .foregroundStyle(.primary)
+
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
         }
-        .padding(.vertical, 16)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
     }
 
     // MARK: - Quick Actions
     private var quickActionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Quick Actions")
-                    .font(.title.weight(.bold))
-
-                Spacer()
-
-                Text("Customize")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Color(hex: "1562D4"))
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            Text("QUICK ACTIONS")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
 
             HStack(spacing: 12) {
                 if let vehicle = viewModel.assignedVehicle {
@@ -305,22 +296,13 @@ struct DriverHomeView: View {
                         TripLogView(vehicle: vehicle)
                             .environmentObject(authViewModel)
                     } label: {
-                        actionCardLabel(
-                            icon: "play.circle",
-                            iconColor: Color(hex: "1562D4"),
-                            iconBackground: Color(hex: "E6EDF9"),
-                            title: "Start Trip"
-                        )
+                        actionCard(title: "Start Trip", icon: "play.fill", color: .navyPrimary)
                     }
-                    .buttonStyle(.plain)
                 } else {
-                    actionCard(
-                        icon: "play.circle",
-                        iconColor: Color(hex: "1562D4"),
-                        iconBackground: Color(hex: "E6EDF9"),
-                        title: "Start Trip"
-                    ) {
+                    Button {
                         showTripUnavailableAlert = true
+                    } label: {
+                        actionCard(title: "Start Trip", icon: "play.fill", color: .secondary)
                     }
                 }
 
@@ -328,103 +310,89 @@ struct DriverHomeView: View {
                     ReportFaultView()
                         .environmentObject(authViewModel)
                 } label: {
-                    actionCardLabel(
-                        icon: "exclamationmark.triangle",
-                        iconColor: Color(hex: "C12822"),
-                        iconBackground: Color(hex: "F8EAE9"),
-                        title: "Report Fault"
-                    )
+                    actionCard(title: "Report Fault", icon: "exclamationmark.bubble.fill", color: .statusOverdue)
                 }
-                .buttonStyle(.plain)
             }
         }
     }
 
-    private func actionCard(
-        icon: String,
-        iconColor: Color,
-        iconBackground: Color,
-        title: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            actionCardLabel(icon: icon, iconColor: iconColor, iconBackground: iconBackground, title: title)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func actionCardLabel(
-        icon: String,
-        iconColor: Color,
-        iconBackground: Color,
-        title: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(iconBackground)
-                    .frame(width: 62, height: 62)
-
-                Image(systemName: icon)
-                    .font(.title.weight(.semibold))
-                    .opacity(0.001)
-                    .frame(height: 0)
-
-                Image(systemName: icon)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(iconColor)
-            }
-
+    private func actionCard(title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.headline)
+                .foregroundStyle(color)
+                .frame(width: 40, height: 40)
+                .background(color.opacity(0.1))
+                .clipShape(Circle())
+            
             Text(title)
-                .font(.title3.weight(.bold))
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
+            
+            Spacer()
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, minHeight: 170, alignment: .topLeading)
+        .padding(12)
+        .frame(maxWidth: .infinity)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
     }
 
     // MARK: - Today Activity
     private var todayActivitySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Today's Activity")
-                .font(.headline.weight(.bold))
+            HStack {
+                Text("TODAY'S ACTIVITY")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(0.5)
+                
+                Spacer()
+                
+                NavigationLink {
+                    DriverRecordsView()
+                } label: {
+                    Text("See All")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.navyPrimary)
+                }
+            }
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(spacing: 0) {
                 if viewModel.todayActivityItems.isEmpty {
-                    Text("No trip or fuel activity logged today.")
+                    Text("No activity logged today")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-
-                    Text("Fuel logs today: \(viewModel.todayFuelLogs)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 30)
+                        .frame(maxWidth: .infinity)
                 } else {
-                    ForEach(viewModel.todayActivityItems) { item in
+                    ForEach(viewModel.todayActivityItems.prefix(5)) { item in
                         activityRow(item)
+                        if item.id != viewModel.todayActivityItems.prefix(5).last?.id {
+                            Divider().padding(.leading, 40)
+                        }
                     }
                 }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
         }
     }
 
     private func activityRow(_ item: DriverActivityItem) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: item.kind == .trip ? "road.lanes" : "fuelpump")
-                .font(.caption.weight(.semibold))
+        HStack(spacing: 12) {
+            Image(systemName: item.kind == .trip ? "road.lanes" : "fuelpump.fill")
+                .font(.subheadline)
                 .foregroundStyle(item.kind == .trip ? Color.navyPrimary : Color.statusDueSoon)
-                .frame(width: 14, height: 14)
+                .frame(width: 32, height: 32)
+                .background((item.kind == .trip ? Color.navyPrimary : Color.statusDueSoon).opacity(0.1))
+                .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-
+                
                 Text(item.subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -433,20 +401,17 @@ struct DriverHomeView: View {
             Spacer()
 
             Text(item.timestamp.formatted(date: .omitted, time: .shortened))
-                .font(.caption2)
+                .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
         }
+        .padding(12)
     }
 
     // MARK: - Helpers
     private var displayName: String {
         let trimmed = authViewModel.currentUserName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return "Driver"
-        }
-
-        let first = trimmed.split(separator: " ").first ?? "Driver"
-        return String(first)
+        guard !trimmed.isEmpty else { return "Driver" }
+        return String(trimmed.split(separator: " ").first ?? "Driver")
     }
 }
 

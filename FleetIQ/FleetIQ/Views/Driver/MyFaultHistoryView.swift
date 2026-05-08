@@ -43,81 +43,67 @@ struct MyFaultHistoryView: View {
     }
 
     var body: some View {
-        List {
-            if normalizedFleetId.isEmpty || normalizedDriverId.isEmpty {
-                Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                filterPicker
+                
+                if normalizedFleetId.isEmpty || normalizedDriverId.isEmpty {
                     ContentUnavailableView(
-                        "Missing Driver Session",
+                        "Missing Session",
                         systemImage: "person.crop.circle.badge.exclamationmark",
-                        description: Text("Please sign in again to load your fault history.")
+                        description: Text("Please sign in again to load history.")
                     )
-                    .frame(maxWidth: .infinity)
-                }
-            } else if filteredFaults.isEmpty {
-                Section {
+                    .padding(.top, 60)
+                } else if filteredFaults.isEmpty {
                     ContentUnavailableView(
                         selectedFilter.emptyTitle,
                         systemImage: "clock.badge.exclamationmark",
                         description: Text(selectedFilter.emptySubtitle)
                     )
-                    .frame(maxWidth: .infinity)
-                }
-            } else {
-                Section {
-                    ForEach(filteredFaults, id: \.id) { fault in
-                        Button {
-                            selectedFault = FaultSnapshot(from: fault)
-                        } label: {
-                            faultRow(fault)
+                    .padding(.top, 60)
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("\(filteredFaults.count) REPORT(S)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                            .tracking(0.5)
+                            .padding(.horizontal, 4)
+
+                        LazyVStack(spacing: 12) {
+                            ForEach(filteredFaults, id: \.id) { fault in
+                                Button {
+                                    selectedFault = FaultSnapshot(from: fault)
+                                } label: {
+                                    faultRow(fault)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
-                } header: {
-                    Text("\(filteredFaults.count) report(s)")
                 }
             }
+            .padding(16)
         }
-        .listStyle(.insetGrouped)
+        .background(Color.systemGroupedBg)
         .navigationTitle("My Faults")
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     ReportFaultView()
                 } label: {
-                    Text("Create")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.statusOverdue)
-                        .clipShape(Capsule())
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(Color.navyPrimary)
                 }
-                .buttonStyle(.plain)
             }
-        }
-        .safeAreaInset(edge: .top) {
-            filterPicker
         }
         .task(id: "\(normalizedFleetId)|\(normalizedDriverId)") {
-            guard !normalizedFleetId.isEmpty, !normalizedDriverId.isEmpty else {
-                return
-            }
-
-            faultViewModel.startMyFaultListener(
-                fleetId: normalizedFleetId,
-                driverId: normalizedDriverId
-            )
+            guard !normalizedFleetId.isEmpty, !normalizedDriverId.isEmpty else { return }
+            faultViewModel.startMyFaultListener(fleetId: normalizedFleetId, driverId: normalizedDriverId)
         }
         .refreshable {
-            guard !normalizedFleetId.isEmpty, !normalizedDriverId.isEmpty else {
-                return
-            }
-
-            faultViewModel.startMyFaultListener(
-                fleetId: normalizedFleetId,
-                driverId: normalizedDriverId
-            )
+            guard !normalizedFleetId.isEmpty, !normalizedDriverId.isEmpty else { return }
+            faultViewModel.startMyFaultListener(fleetId: normalizedFleetId, driverId: normalizedDriverId)
         }
         .sheet(item: $selectedFault) { snapshot in
             FaultDetailSheet(snapshot: snapshot)
@@ -127,105 +113,141 @@ struct MyFaultHistoryView: View {
     }
 
     private var filterPicker: some View {
-        HStack {
-            Picker("Status", selection: $selectedFilter) {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
                 ForEach(FaultHistoryFilter.allCases, id: \.self) { filter in
-                    Text(filter.title).tag(filter)
+                    Button {
+                        selectedFilter = filter
+                    } label: {
+                        Text(filter.title)
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(selectedFilter == filter ? Color.navyPrimary : Color(.systemBackground))
+                            .foregroundColor(selectedFilter == filter ? .white : .primary)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(selectedFilter == filter ? Color.clear : Color(.systemGray5), lineWidth: 1)
+                            )
+                    }
                 }
             }
-            .pickerStyle(.segmented)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
-        .padding(.top, 8)
-        .background(Color(.systemGroupedBackground))
     }
 
     private func faultRow(_ fault: FaultReportEntity) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 urgencyIcon(for: fault.urgency ?? "medium")
+                    .padding(.top, 2)
 
-                Text(fault.descriptionText ?? "Fault report")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top) {
+                        Text(fault.descriptionText ?? "Fault report")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundColor(.primary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                Spacer(minLength: 8)
+                        Spacer(minLength: 8)
 
-                statusChip(for: fault.status ?? "open")
-            }
-
-            HStack(spacing: 8) {
-                Text(formattedDate(fault.createdAt))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text("Manager Response: \(managerResponseText(for: fault.status ?? "open"))")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(managerResponseColor(for: fault.status ?? "open"))
-
-            if let photoURL = fault.photoURL,
-               photoURL.hasPrefix("http"),
-               let url = URL(string: photoURL) {
-                HStack(spacing: 10) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        case .failure(_):
-                            Image(systemName: "photo")
-                                .foregroundStyle(.secondary)
-                        case .empty:
-                            ProgressView()
-                        @unknown default:
-                            Image(systemName: "photo")
-                                .foregroundStyle(.secondary)
-                        }
+                        statusChip(for: fault.status ?? "open")
                     }
-                    .frame(width: 54, height: 54)
-                    .background(Color(.systemGray6))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                    Text("Photo attached")
-                        .font(.caption.weight(.medium))
+                    Text(formattedDate(fault.createdAt))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            } else if (fault.photoURL ?? "").hasPrefix("storage_path:") {
-                Text("Photo uploaded (URL syncing)")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(Color.chipOrangeText)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.chipOrangeBg)
-                    .clipShape(Capsule())
-            } else if (fault.photoURL ?? "") == "upload_failed" {
-                Text("Photo upload failed")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(Color.chipOrangeText)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.chipOrangeBg)
-                    .clipShape(Capsule())
-            } else {
-                Text("No photo attached")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color(.systemGray6))
-                    .clipShape(Capsule())
             }
 
-            if fault.latitude != 0 || fault.longitude != 0 {
-                Text(String(format: "GPS %.4f, %.4f", fault.latitude, fault.longitude))
+            Divider()
+                .opacity(0.5)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.caption2)
+                        .foregroundStyle(managerResponseColor(for: fault.status ?? "open"))
+                    
+                    Text("Manager Response: \(managerResponseText(for: fault.status ?? "open"))")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(managerResponseColor(for: fault.status ?? "open"))
+                }
+
+                if let photoURL = fault.photoURL,
+                   photoURL.hasPrefix("http"),
+                   let url = URL(string: photoURL) {
+                    HStack(spacing: 8) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            default:
+                                Image(systemName: "photo")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(width: 44, height: 44)
+                        .background(Color(.systemGray6))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                        Text("Photo attached")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    photoBadge(for: fault.photoURL ?? "")
+                }
+
+                if fault.latitude != 0 || fault.longitude != 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "location.fill")
+                        Text(String(format: "GPS %.4f, %.4f", fault.latitude, fault.longitude))
+                    }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                }
             }
         }
-        .padding(.vertical, 4)
+        .padding(16)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 3)
+    }
+
+    @ViewBuilder
+    private func photoBadge(for url: String) -> some View {
+        if url.hasPrefix("storage_path:") {
+            badgeView(text: "Photo uploading...", color: .statusDueSoon)
+        } else if url == "upload_failed" {
+            badgeView(text: "Photo upload failed", color: .statusOverdue)
+        } else {
+            HStack(spacing: 4) {
+                Image(systemName: "photo.on.rectangle")
+                Text("No photo attached")
+            }
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color(.systemGray6))
+            .clipShape(Capsule())
+        }
+    }
+
+    private func badgeView(text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
     }
 
     private func urgencyIcon(for urgency: String) -> some View {
