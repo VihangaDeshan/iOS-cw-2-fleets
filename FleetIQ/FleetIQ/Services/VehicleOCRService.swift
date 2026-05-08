@@ -279,30 +279,67 @@ final class VehicleOCRService {
     ///   - keywords: Priority keywords that hint expiry information.
     /// - Returns: Parsed date if present.
     private func expiryDateFromLines(_ lines: [String], keywords: [String]) -> Date? {
+        let expiryLabels = ["valid until", "expires", "expiry date", "expiry", "valid to"]
+
+        // Quick win: expiry label and its date are on the same OCR line.
+        // e.g. "Valid Until: 27 OCT 2024" → return 27 OCT 2024 immediately.
+        for line in lines {
+            let lower = line.lowercased()
+            guard expiryLabels.contains(where: { lower.contains($0) }) else { continue }
+            if let date = allDates(from: line).max() { return date }
+        }
+
+        // Document-type keyword window for date ranges like
+        // "Effective from 01/10/2023 to 30/09/2024" where both dates sit close together.
         for (index, line) in lines.enumerated() {
             let lower = line.lowercased()
-            let hasKeyword = keywords.contains { lower.contains($0) }
-
-            guard hasKeyword else {
-                continue
-            }
-
-            if let date = parseDate(from: line) {
-                return date
-            }
-
-            if index + 1 < lines.count, let nextDate = parseDate(from: lines[index + 1]) {
-                return nextDate
-            }
+            guard keywords.contains(where: { lower.contains($0) }) else { continue }
+            let end = min(index + 8, lines.count)
+            let dates = lines[index..<end].flatMap { allDates(from: $0) }
+            if let latest = dates.max() { return latest }
         }
 
-        for line in lines {
-            if let date = parseDate(from: line) {
-                return date
+        // Final fallback: on any compliance document the expiry is always the
+        // latest date present — test dates and issue dates always predate it.
+        return lines.flatMap { allDates(from: $0) }.max()
+    }
+
+    /// Returns the latest date found in a single OCR line, handling date-range patterns.
+    private func latestDate(from line: String) -> Date? {
+        allDates(from: line).max()
+    }
+
+    /// Finds every parseable date in a single OCR line.
+    private func allDates(from line: String) -> [Date] {
+        let formats = [
+            "dd/MM/yyyy", "d/M/yyyy",
+            "dd-MM-yyyy", "d-M-yyyy",
+            "dd.MM.yyyy",
+            "dd MMM yyyy", "d MMM yyyy",
+            "dd MMMM yyyy", "d MMMM yyyy",
+            "yyyy-MM-dd", "MMM dd, yyyy"
+        ]
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+
+        let pattern = #"\d{1,4}[\s/\-.][A-Za-z\d]{1,4}[\s/\-.]\d{2,4}"#
+        var dates: [Date] = []
+        var searchRange = line.startIndex..<line.endIndex
+
+        while let range = line.range(of: pattern, options: .regularExpression, range: searchRange) {
+            let candidate = String(line[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            for format in formats {
+                formatter.dateFormat = format
+                if let date = formatter.date(from: candidate) {
+                    dates.append(date)
+                    break
+                }
             }
+            searchRange = range.upperBound..<line.endIndex
         }
 
-        return nil
+        return dates
     }
 
     /// Parses a date from mixed OCR text using multiple known formats.
