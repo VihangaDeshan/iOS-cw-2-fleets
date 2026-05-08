@@ -124,6 +124,32 @@ struct LoginView: View {
                     }
                     .padding(.top, 22)
 
+                    if !authViewModel.errorMessage.isEmpty {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundStyle(.red)
+                                .font(.subheadline)
+                                .padding(.top, 1)
+
+                            Text(friendlyErrorMessage(authViewModel.errorMessage))
+                                .font(.subheadline)
+                                .foregroundStyle(.white)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.red.opacity(0.35), lineWidth: 1)
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+                        .padding(.top, 4)
+                    }
+
                     Button(action: signIn) {
                         HStack(spacing: 10) {
                             if isSubmitting {
@@ -205,14 +231,6 @@ struct LoginView: View {
                         .padding(.top, 8)
                     }
 
-                    if !authViewModel.errorMessage.isEmpty {
-                        Text(authViewModel.errorMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.red.opacity(0.9))
-                            .multilineTextAlignment(.center)
-                            .padding(.top, 8)
-                    }
-
                     Spacer(minLength: 26)
                 }
                 .padding(.horizontal, 22)
@@ -233,10 +251,9 @@ struct LoginView: View {
     // MARK: - Private Methods
     /// Starts sign-in flow for selected role using AuthViewModel.
     private func signIn() {
-        guard !isSubmitting else {
-            return
-        }
+        guard !isSubmitting else { return }
 
+        authViewModel.errorMessage = ""
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         isSubmitting = true
 
@@ -245,10 +262,38 @@ struct LoginView: View {
 
             if authViewModel.isAuthenticated {
                 lastUsedEmail = trimmedEmail
+            } else {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    _ = authViewModel.errorMessage
+                }
             }
 
             isSubmitting = false
         }
+    }
+
+    /// Maps technical Firebase error strings to concise, user-friendly messages.
+    private func friendlyErrorMessage(_ raw: String) -> String {
+        let lowered = raw.lowercased()
+        if lowered.contains("password is invalid") || lowered.contains("wrong-password") || lowered.contains("incorrect password") {
+            return "Incorrect password. Please try again."
+        }
+        if lowered.contains("no user record") || lowered.contains("user-not-found") || lowered.contains("user not found") {
+            return "No account found with that email address."
+        }
+        if lowered.contains("badly formatted") || lowered.contains("invalid-email") {
+            return "Please enter a valid email address."
+        }
+        if lowered.contains("too-many-requests") || lowered.contains("too many") {
+            return "Too many attempts. Please wait a moment and try again."
+        }
+        if lowered.contains("network") || lowered.contains("connection") {
+            return "Connection failed. Check your internet and try again."
+        }
+        if lowered.contains("role") || lowered.contains("does not match") {
+            return "This account is registered as a different role."
+        }
+        return "Sign in failed. Please check your details and try again."
     }
 
     /// Toggles visibility state for password field.

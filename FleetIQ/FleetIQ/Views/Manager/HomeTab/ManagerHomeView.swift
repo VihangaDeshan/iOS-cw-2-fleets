@@ -14,6 +14,7 @@ struct ManagerHomeView: View {
     // MARK: - Stored Properties
     @EnvironmentObject var authViewModel: AuthViewModel
     @EnvironmentObject var fleetViewModel: FleetViewModel
+    @Environment(\.appReduceMotion) private var reduceMotion
 
     @Environment(\.managedObjectContext) private var context
     @Environment(\.scenePhase) private var scenePhase
@@ -145,11 +146,13 @@ struct ManagerHomeView: View {
                     managerNotificationsView
                 }
             }
-            .fullScreenCover(isPresented: $showUserProfile) {
+            .sheet(isPresented: $showUserProfile) {
                 NavigationStack {
                     UserProfileView()
                         .environmentObject(authViewModel)
                 }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
             .onAppear {
                 loadHomeMetrics()
@@ -227,13 +230,23 @@ struct ManagerHomeView: View {
                 showUserProfile = true
             } label: {
                 Circle()
-                    .fill(Color.black)
-                    .frame(width: 32, height: 32)
-                    .overlay(
-                        Image(systemName: "person.fill")
-                            .foregroundColor(.white)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.navyPrimary, Color.navySecondary],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
+                    .frame(width: 38, height: 38)
+                    .overlay(
+                        Text(managerInitials)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                    )
+                    .shadow(color: Color.navyPrimary.opacity(0.3), radius: 4, x: 0, y: 2)
             }
+            .accessibilityLabel("View profile")
+            .accessibilityHint("Opens your profile and account settings")
         }
     }
 
@@ -252,9 +265,8 @@ struct ManagerHomeView: View {
         .frame(height: 210)
         .tabViewStyle(.page(indexDisplayMode: .automatic))
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
-            withAnimation {
-                heroPage = (heroPage + 1) % 3
-            }
+            guard !reduceMotion else { return }
+            withAnimation { heroPage = (heroPage + 1) % 3 }
         }
     }
 

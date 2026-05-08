@@ -6,146 +6,177 @@
 //
 
 import SwiftUI
+import FirebaseFirestore
 
 // MARK: - Driver Profile View
 struct DriverProfileView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var authViewModel: AuthViewModel
 
     @AppStorage("faceIDEnabled") private var faceIDEnabled = false
     @AppStorage("isUnlocked") private var isUnlocked = false
 
+    @State private var phone = ""
+    @State private var email = ""
+    @State private var isLoadingProfile = false
+
     private var initials: String {
         let trimmedName = authViewModel.currentUserName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            return "DR"
-        }
-
+        guard !trimmedName.isEmpty else { return "DR" }
         let parts = trimmedName.split(separator: " ")
         if parts.count >= 2 {
             return String(parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
         }
-
         return String(trimmedName.prefix(2)).uppercased()
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Profile Header
-                VStack(spacing: 12) {
-                    Text(initials)
-                        .font(.title2.weight(.bold))
-                        .foregroundColor(.white)
-                        .frame(width: 80, height: 80)
-                        .background(Color.navyPrimary)
-                        .clipShape(Circle())
-                        .shadow(color: Color.navyPrimary.opacity(0.3), radius: 10, x: 0, y: 5)
-                    
-                    VStack(spacing: 4) {
-                        Text(authViewModel.currentUserName.isEmpty ? "Driver" : authViewModel.currentUserName)
-                            .font(.title3.weight(.bold))
-                        
-                        Text("Fleet ID: \(authViewModel.fleetId.isEmpty ? "-" : authViewModel.fleetId)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+        List {
+            // MARK: - Avatar Header
+            Section {
+                HStack {
+                    Spacer()
+                    VStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.navyPrimary, Color.navySecondary],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 80, height: 80)
+                                .shadow(color: Color.navyPrimary.opacity(0.3), radius: 10, x: 0, y: 5)
 
-                // Account Section
-                VStack(alignment: .leading, spacing: 12) {
-                    sectionHeader("ACCOUNT")
-                    
-                    VStack(spacing: 0) {
-                        infoRow(title: "Role", value: authViewModel.userRole.capitalized, icon: "person.badge.shield.fill")
-                        Divider().padding(.leading, 44)
-                        infoRow(title: "Driver ID", value: authViewModel.currentUID, icon: "number")
-                        Divider().padding(.leading, 44)
-                        infoRow(title: "Vehicle ID", value: authViewModel.assignedVehicleId, icon: "car.fill")
-                    }
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
-                }
-
-                // Security Section
-                VStack(alignment: .leading, spacing: 12) {
-                    sectionHeader("SECURITY")
-                    
-                    HStack(spacing: 12) {
-                        Image(systemName: "faceid")
-                            .foregroundColor(.statusActive)
-                            .frame(width: 32, height: 32)
-                            .background(Color.statusActive.opacity(0.1))
-                            .clipShape(Circle())
-                        
-                        Toggle("Face ID Lock", isOn: $faceIDEnabled)
-                            .font(.subheadline.weight(.medium))
-                            .onChange(of: faceIDEnabled) { _, enabled in
-                                if !enabled { isUnlocked = true }
+                            if isLoadingProfile {
+                                ProgressView().tint(.white)
+                            } else {
+                                Text(initials)
+                                    .font(.title2.weight(.bold))
+                                    .foregroundStyle(.white)
                             }
+                        }
+
+                        VStack(spacing: 3) {
+                            Text(authViewModel.currentUserName.isEmpty ? "Driver" : authViewModel.currentUserName)
+                                .font(.title3.weight(.bold))
+
+                            Text(email.isEmpty ? authViewModel.userRole.capitalized : email)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .padding(14)
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
+                    Spacer()
+                }
+                .padding(.vertical, 12)
+                .listRowBackground(Color(.systemGroupedBackground))
+            }
+
+            // MARK: - Account
+            Section("Account") {
+                labeledRow(icon: "person.badge.shield.fill", iconColor: .navyPrimary, label: "Role", value: authViewModel.userRole.capitalized)
+                labeledRow(icon: "number", iconColor: Color(hex: "5856D6"), label: "Driver ID", value: shortId(authViewModel.currentUID))
+                labeledRow(icon: "car.fill", iconColor: .statusDueSoon, label: "Vehicle", value: authViewModel.assignedVehicleId.isEmpty ? "Not assigned" : authViewModel.assignedVehicleId)
+                if !phone.isEmpty {
+                    labeledRow(icon: "phone.fill", iconColor: .statusActive, label: "Phone", value: phone)
+                }
+            }
+
+            // MARK: - Security
+            Section("Security") {
+                NavigationLink(destination: ChangePasswordView()) {
+                    Label {
+                        Text("Change Password")
+                    } icon: {
+                        Image(systemName: "lock.fill")
+                            .foregroundStyle(.blue)
+                    }
                 }
 
-                // Sign Out
-                Button {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(hex: "34C759").opacity(0.15))
+                            .frame(width: 32, height: 32)
+                        Image(systemName: "faceid")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color(hex: "34C759"))
+                    }
+
+                    Toggle("Face ID Lock", isOn: $faceIDEnabled)
+                        .onChange(of: faceIDEnabled) { _, enabled in
+                            if !enabled { isUnlocked = true }
+                        }
+                }
+            }
+
+            // MARK: - Sign Out
+            Section {
+                Button(role: .destructive) {
                     authViewModel.signOut()
                 } label: {
                     HStack {
-                        Image(systemName: "arrow.right.square.fill")
-                        Text("Sign Out")
-                            .font(.headline)
+                        Spacer()
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                            .fontWeight(.semibold)
+                        Spacer()
                     }
-                    .foregroundColor(.statusOverdue)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Color.statusOverdue.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                .padding(.top, 10)
             }
-            .padding(16)
         }
-        .background(Color.systemGroupedBg)
+        .listStyle(.insetGrouped)
         .navigationTitle("Profile")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
+        .task { await loadProfile() }
     }
 
-    private func infoRow(title: String, value: String, icon: String) -> some View {
+    // MARK: - Helpers
+
+    private func labeledRow(icon: String, iconColor: Color, label: String, value: String) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.subheadline)
-                .foregroundColor(.navyPrimary)
-                .frame(width: 32, height: 32)
-                .background(Color.navyPrimary.opacity(0.1))
-                .clipShape(Circle())
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Text(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : value)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(iconColor.opacity(0.15))
+                    .frame(width: 32, height: 32)
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(iconColor)
             }
+
+            Text(label)
+                .foregroundStyle(.primary)
+
             Spacer()
+
+            Text(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "—" : value)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
-        .padding(14)
     }
 
-    private func sectionHeader(_ text: String) -> some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundColor(.secondary)
-            .tracking(0.5)
-            .padding(.horizontal, 4)
+    private func shortId(_ uid: String) -> String {
+        uid.isEmpty ? "—" : String(uid.prefix(12)) + "…"
+    }
+
+    private func loadProfile() async {
+        guard !authViewModel.currentUID.isEmpty else { return }
+        isLoadingProfile = true
+        defer { isLoadingProfile = false }
+
+        do {
+            let doc = try await Firestore.firestore()
+                .collection("users")
+                .document(authViewModel.currentUID)
+                .getDocument()
+            let data = doc.data() ?? [:]
+            phone = data["phone"] as? String ?? ""
+            email = data["email"] as? String ?? ""
+        } catch {
+            // Non-critical — profile still shows from authViewModel state
+        }
     }
 }
 

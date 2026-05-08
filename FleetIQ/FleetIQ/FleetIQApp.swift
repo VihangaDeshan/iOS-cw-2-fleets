@@ -67,9 +67,23 @@ struct FleetIQApp: App {
     @StateObject private var authViewModel: AuthViewModel
 
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding: Bool = false
-    @AppStorage("isUnlocked") private var isUnlocked: Bool = false
-    @AppStorage("faceIDEnabled") private var faceIDEnabled: Bool = false
-    @AppStorage("lastSelectedRole") private var lastSelectedRole: String = "manager"
+    @AppStorage("isUnlocked")        private var isUnlocked: Bool        = false
+    @AppStorage("faceIDEnabled")     private var faceIDEnabled: Bool     = false
+    @AppStorage("lastSelectedRole")  private var lastSelectedRole: String = "manager"
+    @AppStorage("lockOnBackground")  private var lockOnBackground: Bool  = true
+
+    // Accessibility
+    @AppStorage("accessibilityBoldText")     private var accessibilityBoldText:     Bool   = false
+    @AppStorage("accessibilityReduceMotion") private var accessibilityReduceMotion: Bool   = false
+    @AppStorage("accessibilityTextSize")     private var accessibilityTextSize:     String = "default"
+
+    private var mappedDynamicTypeSize: DynamicTypeSize {
+        switch accessibilityTextSize {
+        case "large":      return .xLarge
+        case "extraLarge": return .accessibility1
+        default:           return .large
+        }
+    }
 
     // MARK: - Initializer
     /// Creates app-level state objects.
@@ -121,6 +135,12 @@ struct FleetIQApp: App {
             }
             .environmentObject(authViewModel)
             .environment(\.managedObjectContext, persistenceController.container.viewContext)
+            // Accessibility — applied at root so every descendant view inherits them.
+            // legibilityWeight: nil lets the system choose; .bold makes all Text heavier.
+            .environment(\.legibilityWeight, accessibilityBoldText ? .bold : nil)
+            .environment(\.dynamicTypeSize, mappedDynamicTypeSize)
+            .environment(\.appReduceMotion, accessibilityReduceMotion)
+            .environment(\.appBoldText, accessibilityBoldText)
             .task {
                 authViewModel.startAuthStateListenerIfNeeded()
                 await NotificationService.shared.requestPermission()
@@ -159,7 +179,7 @@ struct FleetIQApp: App {
     /// Applies lock behavior for app lifecycle transitions.
     /// - Parameter phase: Current SwiftUI scene phase.
     private func handleScenePhaseChange(_ phase: ScenePhase) {
-        if phase == .background && faceIDEnabled {
+        if phase == .background && faceIDEnabled && lockOnBackground {
             isUnlocked = false
             return
         }
