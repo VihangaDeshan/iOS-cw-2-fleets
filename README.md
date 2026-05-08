@@ -5,6 +5,8 @@ this is a iOS cw part 2. that is developing fleet management app
 
   S.M.A.D.V.Deshan Sammandapperuma
 
+  fleetIQ
+
  # MVP
 
  App Name: FleetIQ
