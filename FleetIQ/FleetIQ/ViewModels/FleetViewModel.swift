@@ -354,6 +354,23 @@ class FleetViewModel: ObservableObject {
         do {
             try await firestoreService.deleteVehicle(fleetId: fleetId, vehicleId: vehicleId)
 
+            if let vehicleUUID = vehicle.id {
+                let faultRequest = NSFetchRequest<FaultReportEntity>(entityName: "FaultReportEntity")
+                faultRequest.predicate = NSPredicate(format: "vehicleId == %@", vehicleUUID as CVarArg)
+                let faults = (try? context.fetch(faultRequest)) ?? []
+                for fault in faults { context.delete(fault) }
+
+                let docRequest = NSFetchRequest<DocumentEntity>(entityName: "DocumentEntity")
+                docRequest.predicate = NSPredicate(format: "vehicleId == %@", vehicleUUID as CVarArg)
+                let docs = (try? context.fetch(docRequest)) ?? []
+                for doc in docs { context.delete(doc) }
+
+                let serviceRequest = NSFetchRequest<ServiceRecordEntity>(entityName: "ServiceRecordEntity")
+                serviceRequest.predicate = NSPredicate(format: "vehicleId == %@", vehicleUUID as CVarArg)
+                let records = (try? context.fetch(serviceRequest)) ?? []
+                for record in records { context.delete(record) }
+            }
+
             context.delete(vehicle)
             try context.save()
             fetchFromCoreData()

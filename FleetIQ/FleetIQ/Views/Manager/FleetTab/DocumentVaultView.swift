@@ -109,12 +109,12 @@ struct DocumentVaultView: View {
             .onChange(of: fetchedDocuments.count) { _, _ in
                 checkExpiredDocuments()
             }
+            .disabled(isSaving)
             .alert("Expired Documents", isPresented: $showExpiredAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text("The following documents have EXPIRED and require immediate renewal:\n\n\(expiredDocumentNames.joined(separator: "\n"))")
             }
-            .disabled(isSaving)
         }
     }
 
@@ -347,9 +347,9 @@ struct DocumentVaultView: View {
 
             try context.save()
 
-            NotificationService.shared.scheduleAllExpiryWarnings(
+            NotificationService.shared.rescheduleExpiryIfNeeded(
                 vehicleRegistration: vehicle.registration ?? "",
-                documentType: docType,
+                documentType: docType.capitalized,
                 expiryDate: pendingExpiryDate,
                 vehicleId: vehicleId
             )

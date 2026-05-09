@@ -315,7 +315,6 @@ final class FaultViewModel: ObservableObject {
         switch target {
         case .manager:
             let existingIds = Set(faultReports.compactMap { $0.id })
-            let isInitialLoad = existingIds.isEmpty
 
             faultReports = sorted
 
@@ -328,21 +327,23 @@ final class FaultViewModel: ObservableObject {
                 }
             }
 
-            if !isInitialLoad {
-                for fault in sorted {
-                    guard let faultId = fault.id, !existingIds.contains(faultId) else { continue }
-
-                    Task {
-                        let reg = fault.vehicleId.flatMap { vehicleId in
-                            try? context.fetch(NSFetchRequest<VehicleEntity>(entityName: "VehicleEntity")).first(where: { $0.id == vehicleId })?.registration
-                        } ?? "Vehicle"
-
-                        NotificationService.shared.sendNewFaultToManager(
-                            vehicleReg: reg,
-                            description: fault.descriptionText ?? "",
-                            urgency: fault.urgency ?? "medium"
-                        )
-                    }
+            let seenIdsRaw = UserDefaults.standard.string(forKey: "managerReadNotificationIDs") ?? ""
+            let seenIds = Set(seenIdsRaw.components(separatedBy: ","))
+            for fault in sorted {
+                guard let faultId = fault.id,
+                      !existingIds.contains(faultId),
+                      !seenIds.contains(faultId.uuidString),
+                      (fault.status ?? "").lowercased() == "pending"
+                else { continue }
+                Task {
+                    let reg = fault.vehicleId.flatMap { vehicleId in
+                        try? context.fetch(NSFetchRequest<VehicleEntity>(entityName: "VehicleEntity")).first(where: { $0.id == vehicleId })?.registration
+                    } ?? "Vehicle"
+                    NotificationService.shared.sendNewFaultToManager(
+                        vehicleReg: reg,
+                        description: fault.descriptionText ?? "",
+                        urgency: fault.urgency ?? "medium"
+                    )
                 }
             }
         case .driver:

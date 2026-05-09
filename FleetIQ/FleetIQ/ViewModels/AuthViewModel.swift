@@ -148,6 +148,7 @@ final class AuthViewModel: ObservableObject {
         do {
             try authService.signOut()
             PersistenceController.shared.clearAllData()
+            NotificationService.shared.resetSessionState()
             resetAuthState()
         } catch {
             errorMessage = error.localizedDescription

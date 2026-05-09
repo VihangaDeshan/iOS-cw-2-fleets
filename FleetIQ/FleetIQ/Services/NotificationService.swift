@@ -37,6 +37,7 @@ final class NotificationService {
     func resetSessionState() {
         firedSessionExpiries.removeAll()
         firedSessionFaults.removeAll()
+        firedSessionServices = []
         hasFiredDriverWelcome = false
         hasFiredManagerWelcome = false
         nextNotificationDelay = 2.0
@@ -59,6 +60,13 @@ final class NotificationService {
         vehicleId: UUID
     ) {
         guard UserDefaults.standard.notifyServiceDue else { return }
+        let daysUntil = Calendar.current.dateComponents([.day], from: Date(), to: predictedDate).day ?? 0
+        if daysUntil <= 30 {
+            sendImmediate(
+                title: "Service Due Soon 🔧",
+                body: "\(vehicleRegistration) is predicted to need service in \(daysUntil) days.",
+                identifier: "service-immediate-\(vehicleId.uuidString)")
+        }
         let identifier = "service-\(vehicleId.uuidString)"
         let content = UNMutableNotificationContent()
         content.title = "Service Due Soon"
@@ -88,6 +96,39 @@ final class NotificationService {
                 withIdentifiers: [identifier])
         UNUserNotificationCenter.current()
             .add(request)
+    }
+
+    func rescheduleServiceIfNeeded(
+        vehicleRegistration: String,
+        predictedDate: Date,
+        vehicleId: UUID
+    ) {
+        guard UserDefaults.standard.notifyServiceDue else { return }
+
+        let sessionKey = "service-\(vehicleId.uuidString)"
+        guard !firedSessionServices.contains(sessionKey) else { return }
+        firedSessionServices.insert(sessionKey)
+
+        let daysUntil = Calendar.current.dateComponents(
+            [.day], from: Calendar.current.startOfDay(for: Date()),
+            to: Calendar.current.startOfDay(for: predictedDate)).day ?? Int.min
+
+        if daysUntil < 0 {
+            sendImmediate(
+                title: "Service Overdue 🚨",
+                body: "\(vehicleRegistration) service is overdue by \(abs(daysUntil)) day(s). Book a garage immediately.",
+                identifier: sessionKey)
+        } else if daysUntil <= 14 {
+            sendImmediate(
+                title: "Service Due Soon 🔧",
+                body: "\(vehicleRegistration) is due for service in \(daysUntil) days. Contact your garage to schedule.",
+                identifier: sessionKey)
+        }
+
+        scheduleServiceDue(
+            vehicleRegistration: vehicleRegistration,
+            predictedDate: predictedDate,
+            vehicleId: vehicleId)
     }
 
     /// Schedules document expiry warning.
@@ -196,6 +237,7 @@ final class NotificationService {
     // This resets when the app is fully closed and reopened.
     private var firedSessionExpiries: [String: Date] = [:]
     private var firedSessionFaults = Set<String>()
+    private var firedSessionServices = Set<String>()
 
     func fireManagerFaultIfNeeded(
         vehicleReg: String,
@@ -388,7 +430,7 @@ final class NotificationService {
             timeInterval: nextNotificationDelay,
             repeats: false)
             
-        nextNotificationDelay += 1.5 // Stagger multiple notifications
+        nextNotificationDelay += 0.5 // Stagger multiple notifications
 
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(
