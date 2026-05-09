@@ -16,6 +16,8 @@ struct VehicleCardView: View {
     @EnvironmentObject var fleetViewModel: FleetViewModel
     @EnvironmentObject var authViewModel: AuthViewModel
 
+    @State private var showDeleteAlert = false
+
     // MARK: - Computed Properties
     var status: String {
         fleetViewModel.vehicleStatus(vehicle)
@@ -109,6 +111,21 @@ struct VehicleCardView: View {
                 Spacer()
 
                 VehicleStatusChip(status: status)
+
+                Button {
+                    showDeleteAlert = true
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundColor(.statusOverdue)
+                }
+            }
+            .alert("Delete Vehicle?", isPresented: $showDeleteAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    Task { await fleetViewModel.deleteVehicle(vehicle, fleetId: authViewModel.fleetId) }
+                }
+            } message: {
+                Text("This will permanently delete \(vehicle.registration ?? "") and all its fault reports, documents, and service records. This cannot be undone.")
             }
 
             HStack(alignment: .firstTextBaseline) {

@@ -147,14 +147,32 @@ class FirestoreService {
                 .collection("vehicles")
                 .document(vehicleId)
                 .delete { error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                        return
-                    }
-
+                    if let error { continuation.resume(throwing: error); return }
                     continuation.resume(returning: ())
                 }
         }
+        let faults = try await db.collection("fleets").document(fleetId).collection("faultReports").whereField("vehicleId", isEqualTo: vehicleId).getDocuments()
+        for doc in faults.documents {
+            let data = doc.data()
+            var photoRefs: [String] = []
+            if let list = data["photoURLs"] as? [String] { photoRefs.append(contentsOf: list) }
+            if let single = data["photoURL"] as? String, !single.isEmpty { photoRefs.append(single) }
+            for ref in photoRefs { try? await deleteStorageObject(path: ref) }
+            try await doc.reference.delete()
+        }
+
+        let docs = try await db.collection("fleets").document(fleetId).collection("documents").whereField("vehicleId", isEqualTo: vehicleId).getDocuments()
+        for doc in docs.documents {
+            let data = doc.data()
+            if let docType = data["type"] as? String, !docType.isEmpty,
+               let path = try? documentPhotoPath(fleetId: fleetId, vehicleId: vehicleId, docType: docType) {
+                try? await deleteStorageObject(path: path)
+            }
+            try await doc.reference.delete()
+        }
+
+        let records = try await db.collection("fleets").document(fleetId).collection("serviceRecords").whereField("vehicleId", isEqualTo: vehicleId).getDocuments()
+        for doc in records.documents { try await doc.reference.delete() }
     }
 
     /// Updates one or more fields on a vehicle document in Firestore.
