@@ -347,9 +347,9 @@ struct DocumentVaultView: View {
 
             try context.save()
 
-            NotificationService.shared.scheduleAllExpiryWarnings(
+            NotificationService.shared.rescheduleExpiryIfNeeded(
                 vehicleRegistration: vehicle.registration ?? "",
-                documentType: docType,
+                documentType: docType.capitalized,
                 expiryDate: pendingExpiryDate,
                 vehicleId: vehicleId
             )

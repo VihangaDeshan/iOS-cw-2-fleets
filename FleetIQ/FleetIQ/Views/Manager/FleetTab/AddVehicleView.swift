@@ -668,9 +668,9 @@ struct AddVehicleView: View {
                 try context.save()
 
                 if let expiryDate = expiry {
-                    NotificationService.shared.scheduleAllExpiryWarnings(
+                    NotificationService.shared.rescheduleExpiryIfNeeded(
                         vehicleRegistration: normalizedRegistration,
-                        documentType: type,
+                        documentType: type.capitalized,
                         expiryDate: expiryDate,
                         vehicleId: vehicleUUID
                     )
@@ -709,9 +709,9 @@ struct AddVehicleView: View {
                 entity.expiryDate = emissionExpiry
                 entity.photoURL = ""
                 try ctx.save()
-                NotificationService.shared.scheduleAllExpiryWarnings(
+                NotificationService.shared.rescheduleExpiryIfNeeded(
                     vehicleRegistration: normalizedRegistration,
-                    documentType: "emission",
+                    documentType: "Emission",
                     expiryDate: emissionExpiry,
                     vehicleId: vehicleUUID
                 )

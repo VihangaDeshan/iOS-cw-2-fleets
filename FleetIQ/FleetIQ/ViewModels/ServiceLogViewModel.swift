@@ -153,7 +153,7 @@ final class ServiceLogViewModel: ObservableObject {
             byAdding: .day,
             value: Int(avgInterval / 80),
             to: Date()) ?? Date()
-        NotificationService.shared.scheduleServiceDue(
+        NotificationService.shared.rescheduleServiceIfNeeded(
             vehicleRegistration: vehicleRegistrationForId(vehicleId),
             predictedDate: predictedDate,
             vehicleId: vehicleId)

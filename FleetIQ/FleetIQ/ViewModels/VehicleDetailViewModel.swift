@@ -156,17 +156,17 @@ final class VehicleDetailViewModel: ObservableObject {
 
             if let id = vehicle.id, let reg = vehicle.registration {
                 if let insuranceExpiry {
-                    NotificationService.shared.scheduleAllExpiryWarnings(
+                    NotificationService.shared.rescheduleExpiryIfNeeded(
                         vehicleRegistration: reg,
-                        documentType: "insurance",
+                        documentType: "Insurance",
                         expiryDate: insuranceExpiry,
                         vehicleId: id
                     )
                 }
                 if let licenceExpiry {
-                    NotificationService.shared.scheduleAllExpiryWarnings(
+                    NotificationService.shared.rescheduleExpiryIfNeeded(
                         vehicleRegistration: reg,
-                        documentType: "licence",
+                        documentType: "Licence",
                         expiryDate: licenceExpiry,
                         vehicleId: id
                     )
@@ -199,9 +199,9 @@ final class VehicleDetailViewModel: ObservableObject {
                     ]
                     try await firestoreService.saveDocument(payload, fleetId: fleetId, docId: docId)
 
-                    NotificationService.shared.scheduleAllExpiryWarnings(
+                    NotificationService.shared.rescheduleExpiryIfNeeded(
                         vehicleRegistration: reg,
-                        documentType: "emission",
+                        documentType: "Emission",
                         expiryDate: expiry,
                         vehicleId: id
                     )
